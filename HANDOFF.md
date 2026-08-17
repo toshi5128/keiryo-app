@@ -51,12 +51,29 @@ supabase/migrations/0001_init.sql
 ## 開発
 
 ```
-npm test          # vitest（108件）
+npm test          # vitest（131件）
 npm run build     # tsc --noEmit + vite build
 npm run dev
+node tools/shots.mjs   # 実機幅390pxで全タブ撮影（端末のChromeを使う）
 ```
 
 Node は `C:\Users\st106\AppData\Local\Programs\nodejs\node.exe`（bash の PATH 外）。
+
+**UI を変えたら `tools/shots.mjs` で実機幅を目視してから「完了」と言う。** DOM 確認だけで判断しない。
+
+## 配信（GitHub Pages）
+
+- repo: `toshi5128/keiryo-app` ／ URL: https://toshi5128.github.io/keiryo-app/
+- `main` に push すると `.github/workflows/pages.yml` が走る。**このファイルを消さないこと。**
+  ワークフローは `npm test` → `tsc --noEmit` → `vite build` の順。**テストが落ちたら配信されない。**
+- `vite.config.ts` の `base` は GitHub Actions のときだけ `/keiryo-app/`。ローカルは `/`。
+- Pages の設定は「Source = GitHub Actions」。ブランチからの自動ビルド(legacy)は使わない。
+- run が `waiting` のまま固まったら、それを cancel しないと後続が永久に `pending`（ATLAS で実績あり）。
+
+## 保存先
+
+Phase 1 は **localStorage**（キー `keiryo.v1`）。ログイン不要で即使えることを優先した。
+設定タブから JSON で書き出し・読み込みができる。Supabase 同期は Phase 2。
 
 ---
 
