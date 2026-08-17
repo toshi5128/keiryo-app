@@ -280,7 +280,9 @@ export function Today() {
         </div>
       ))}
 
-      {result.notes.length > 0 && (
+      {/* 献立を組んだときだけ補足を出す。起床前や1日の終わりに
+          「目標に届きません」と言われても、まだ何も始まっていない／もう打つ手がない */}
+      {wakeAt && mealCount > 0 && result.notes.length > 0 && (
         <div className="log calm">
           <b>ソルバーからの補足</b>
           {result.notes.map((n, i) => (
