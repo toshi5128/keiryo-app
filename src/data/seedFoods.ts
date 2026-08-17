@@ -47,7 +47,7 @@ export const SEED_FOODS: Food[] = [
   { id: 'meka', name: 'めかぶ', baseAmount: 1, baseUnit: 'P', kcal: 15, proteinG: 1.0, fatG: 0.2, carbG: 2.0, saltG: 0.4, category: 'veg', stepAmount: 1, maxAmount: 2 },
 
   // ---- fat / other ----
-  { id: 'oil', name: 'オリーブオイル', baseAmount: 1, baseUnit: '小さじ', kcal: 40, proteinG: 0, fatG: 4.5, carbG: 0, category: 'fat', isStaple: true, stepAmount: 1, maxAmount: 4 },
+  { id: 'oil', name: 'オリーブオイル（小さじ）', baseAmount: 1, baseUnit: '杯', kcal: 40, proteinG: 0, fatG: 4.5, carbG: 0, category: 'fat', isStaple: true, stepAmount: 1, maxAmount: 4 },
   { id: 'misoshiru', name: '味噌汁', baseAmount: 1, baseUnit: '杯', kcal: 40, proteinG: 3.0, fatG: 1.5, carbG: 4.0, saltG: 1.5, category: 'other', stepAmount: 1, maxAmount: 2 },
 
   // ---- sweet ----
