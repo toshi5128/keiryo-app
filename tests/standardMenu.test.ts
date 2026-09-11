@@ -90,29 +90,29 @@ describe('★標準メニュー（v4 §4）', () => {
   const meal = standardMealMacros(SEED_FOODS)
   const day = standardDayMacros(SEED_FOODS)
 
-  it('構成は そぼろ120g + 卵1個 + ご飯170g + オイル6g の4点', () => {
+  it('構成は そぼろ120g + 卵1個 + ご飯190g + オイル9g の4点', () => {
     expect(STANDARD_MEAL).toHaveLength(4)
     expect(standardMealItems(SEED_FOODS).map((i) => `${i.food.id}${i.amount}`)).toEqual([
       'sobo120',
       'egg1',
-      'rice170',
-      'oil6',
+      'rice190',
+      'oil9',
     ])
   })
 
-  it('1食 = P44 / 599kcal / F16.5（引き継ぎ書の表と一致する）', () => {
+  it('1食 = P44 / 657kcal / F19.6', () => {
     expect(Math.round(meal.proteinG)).toBe(44)
-    expect(Math.round(meal.kcal)).toBe(599)
-    expect(meal.fatG).toBeCloseTo(16.5, 1)
+    expect(Math.round(meal.kcal)).toBe(657)
+    expect(meal.fatG).toBeCloseTo(19.6, 1)
   })
 
   it('1食の塩分は約1.2g（引き継ぎ書の1.0gは卵のぶんを数えていない）', () => {
     expect(meal.saltG).toBeCloseTo(1.16, 2)
   })
 
-  it('1日（3食＋プロテイン2杯）は P175 前後で、★日次必達の170gを満たす', () => {
+  it('★1日のタンパク質は175gで、日次必達の170gを満たす', () => {
     expect(day.proteinG).toBeGreaterThanOrEqual(170)
-    expect(Math.round(day.proteinG)).toBe(174)
+    expect(Math.round(day.proteinG)).toBe(175)
   })
 
   it('1日の塩分は上限6gに対して余裕がある', () => {
@@ -120,16 +120,38 @@ describe('★標準メニュー（v4 §4）', () => {
     expect(day.saltG).toBeCloseTo(3.7, 1)
   })
 
-  it('★1日のカロリーは目標2,200に対して約160kcal 足りない（引き継ぎ書の2,170は誤り）', () => {
-    // 引き継ぎ書 §4 の表は「1食599kcal × 3 ＋ プロテイン240kcal」で 2,038kcal。
-    // 同じ表の「1日合計 2,170kcal」とは 132kcal 合わない。食材マスタを正とする。
-    expect(Math.round(day.kcal)).toBe(2038)
-    expect(2200 - day.kcal).toBeGreaterThan(100)
+  it('★1日のカロリーが目標2,200にほぼ乗る（±50kcal）', () => {
+    expect(Math.round(day.kcal)).toBe(2212)
+    expect(Math.abs(day.kcal - 2200)).toBeLessThanOrEqual(50)
   })
 
-  it('★脂質は下限58gを下回るので、オイルかご飯での補填が必要', () => {
-    expect(day.fatG).toBeLessThan(58)
-    expect(day.fatG).toBeCloseTo(52.5, 1)
+  it('★1日の脂質が下限58gを割らない（ここがご飯170g/オイル6gでは満たせなかった）', () => {
+    expect(day.fatG).toBeGreaterThanOrEqual(58)
+    expect(day.fatG).toBeCloseTo(61.7, 1)
+  })
+
+  it('★引き継ぎ書どおりの ご飯170g/オイル6g では下限を割ることを記録しておく', () => {
+    // 元の配合は 2,038kcal・F52.5g。なぜ数値を変えたのかを残すためのテスト。
+    const orig = [
+      { id: 'sobo', amt: 120 },
+      { id: 'egg', amt: 1 },
+      { id: 'rice', amt: 170 },
+      { id: 'oil', amt: 6 },
+    ]
+    const per = orig.reduce(
+      (acc, o) => {
+        const f = seedFoodById(o.id)
+        const r = o.amt / f.baseAmount
+        return { kcal: acc.kcal + f.kcal * r, fatG: acc.fatG + f.fatG * r }
+      },
+      { kcal: 0, fatG: 0 }
+    )
+    const whey = seedFoodById('whey')
+    const origDayKcal = per.kcal * 3 + whey.kcal * 2
+    const origDayFat = per.fatG * 3 + whey.fatG * 2
+    expect(Math.round(origDayKcal)).toBe(2038)
+    expect(origDayFat).toBeCloseTo(52.5, 1)
+    expect(origDayFat).toBeLessThan(58)
   })
 })
 
@@ -146,13 +168,14 @@ describe('★1週間の買い物（v4 §4）', () => {
     expect(find('鶏むねミンチ').unit).toBe('kg')
   })
 
-  it('卵21個・オリーブオイル126g・プロテイン14杯', () => {
+  it('卵21個・オリーブオイル189g・プロテイン14杯', () => {
     expect(find('卵').amount).toBe(21)
-    expect(find('オリーブオイル').amount).toBe(126)
+    expect(find('オリーブオイル').amount).toBe(189)
     expect(find('プロテイン').amount).toBe(14)
   })
 
   it('米は炊く前の重量で出す', () => {
-    expect(find('米').note).toContain('炊飯後 3,570g')
+    expect(find('米').note).toContain('炊飯後 3,990g')
+    expect(find('米').amount).toBe(1.8)
   })
 })

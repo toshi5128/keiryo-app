@@ -480,7 +480,7 @@ export const SEED_FOODS: Food[] = [
     isStaple: true,
     stepAmount: 2,
     maxAmount: 20,
-    note: '標準メニューは1食6g（小さじ1杯半ほど）',
+    note: '標準メニューは1食9g（小さじ2杯強）。脂質の下限58gを割らないための量',
   },
 
   // ---- other ------------------------------------------------------------

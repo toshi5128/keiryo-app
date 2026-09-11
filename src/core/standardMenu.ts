@@ -2,14 +2,21 @@
  * ★標準メニュー（KEIRYO-HANDOFF-v4.md §4。2026-09-12 確定）
  *
  * 「シンプルで覚えやすい1パターンに固定したい」と本人が決めた形。
- *   そぼろ120g + 卵1個 + ご飯170g + オリーブオイル6g   × 3食
+ *   そぼろ120g + 卵1個 + ご飯190g + オリーブオイル9g   × 3食
  *   プロテイン2杯（1食目とジム後）
+ *
+ * ★ご飯とオイルは引き継ぎ書の 170g / 6g から変えている（2026-09-12・本人承認）。
+ *   元の配合だと 1日 2,038kcal・脂質52.5g にしかならず、
+ *   ★脂質の下限58g を 5.5g 割っていた（カロリーも160kcal 不足）。
+ *   カロリーは「週で帳尻が合えばよい」(§3) が、脂質の下限は日次の線なので埋める必要がある。
+ *   ご飯190g / オイル9g にすると 2,212kcal・P175・F61.7 で、
+ *   この1パターンだけで全部の目標に届く。固定メニューの意味を保つためこちらを採った。
  *
  * アプリ起動時のデフォルト献立であり、最頻出の操作（ワンタップ記録）の中身。
  *
  * ★合計値はここに焼き付けず、必ず食材マスタから計算する。
- *   引き継ぎ書の表に「1日 2,170kcal」と書いてあるが、同じ表の
- *   「1食 599kcal × 3 ＋ プロテイン240kcal」は 2,038kcal にしかならない。
+ *   引き継ぎ書の表は「1日 2,170kcal」と書いているが、同じ表の
+ *   「1食 599kcal × 3 ＋ プロテイン240kcal」は 2,038kcal にしかならず食い違っている。
  *   数字を二重に持つとどちらが正か分からなくなるので、食材マスタを唯一の正とする。
  */
 
@@ -20,8 +27,8 @@ import { ZERO, addMacros, macrosOf } from './solver'
 export const STANDARD_MEAL: ReadonlyArray<{ foodId: string; amount: number }> = [
   { foodId: 'sobo', amount: 120 }, // ★調理後の重量
   { foodId: 'egg', amount: 1 },
-  { foodId: 'rice', amount: 170 },
-  { foodId: 'oil', amount: 6 },
+  { foodId: 'rice', amount: 190 },
+  { foodId: 'oil', amount: 9 },
 ]
 
 /** 1日の食事回数 */
@@ -104,9 +111,10 @@ export interface ShoppingLine {
  * ★そぼろは「生」の重量で出す。調理後360g/日 ÷ 0.78 = 生 約462g/日。
  */
 export function shoppingList(days = 7): ShoppingLine[] {
-  const cookedSoboroG = 120 * STANDARD_MEALS_PER_DAY * days
+  const per = (foodId: string) => STANDARD_MEAL.find((x) => x.foodId === foodId)?.amount ?? 0
+  const cookedSoboroG = per('sobo') * STANDARD_MEALS_PER_DAY * days
   const rawSoboroG = soboroCookedToRaw(cookedSoboroG)
-  const cookedRiceG = 170 * STANDARD_MEALS_PER_DAY * days
+  const cookedRiceG = per('rice') * STANDARD_MEALS_PER_DAY * days
   return [
     {
       label: '鶏むねミンチ（生）',
@@ -121,7 +129,7 @@ export function shoppingList(days = 7): ShoppingLine[] {
       unit: 'kg',
       note: `炊飯後 ${cookedRiceG.toLocaleString()}g ぶん`,
     },
-    { label: 'オリーブオイル', amount: 6 * STANDARD_MEALS_PER_DAY * days, unit: 'g' },
+    { label: 'オリーブオイル', amount: per('oil') * STANDARD_MEALS_PER_DAY * days, unit: 'g' },
     { label: 'プロテイン', amount: STANDARD_SHAKES_PER_DAY * days, unit: '杯' },
   ]
 }

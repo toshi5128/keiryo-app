@@ -45,14 +45,14 @@ await page.evaluate(() => {
     const d = new Date(now.getTime() - n * 86400000)
     return logDate(d)
   }
-  // ★v4 の標準メニュー1食（そぼろ120g・卵1個・ご飯170g・オイル6g）＋プロテイン1杯。
+  // ★v4 の標準メニュー1食（そぼろ120g・卵1個・ご飯190g・オイル9g）＋プロテイン1杯。
   //   1食目 P65 なので 45g の警告は出ず、「確保できています」が出るのが正解。
   const group = 'g1'
   const meal1 = [
     { name: '鶏そぼろ（調理後・薄味）', foodId: 'sobo', amount: 120, unit: 'g', kcal: 204, proteinG: 33.6, fatG: 4.8, carbG: 7.2, saltG: 1 },
     { name: '卵', foodId: 'egg', amount: 1, unit: '個', kcal: 76, proteinG: 6, fatG: 5.2, carbG: 0.2, saltG: 0.2 },
-    { name: '白米（炊飯後）', foodId: 'rice', amount: 170, unit: 'g', kcal: 265, proteinG: 4.3, fatG: 0.5, carbG: 62.9, saltG: 0 },
-    { name: 'オリーブオイル', foodId: 'oil', amount: 6, unit: 'g', kcal: 54, proteinG: 0, fatG: 6, carbG: 0, saltG: 0 },
+    { name: '白米（炊飯後）', foodId: 'rice', amount: 190, unit: 'g', kcal: 296.4, proteinG: 4.75, fatG: 0.57, carbG: 70.3, saltG: 0 },
+    { name: 'オリーブオイル', foodId: 'oil', amount: 9, unit: 'g', kcal: 81, proteinG: 0, fatG: 9, carbG: 0, saltG: 0 },
     { name: 'プロテイン', foodId: 'whey', amount: 1, unit: '杯', kcal: 120, proteinG: 21, fatG: 1.5, carbG: 3, saltG: 0.1 },
   ].map((m, i) => ({
     ...m,

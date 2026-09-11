@@ -249,7 +249,7 @@ export function Today() {
     const m = standardMealMacros(state.foods)
     setNote({
       title: `標準メニュー1食を記録しました（P${Math.round(m.proteinG)} / ${Math.round(m.kcal)}kcal）`,
-      body: 'そぼろ120g・卵1個・ご飯170g・オイル6g。そぼろは調理後の重量です。',
+      body: 'そぼろ120g・卵1個・ご飯190g・オイル9g。そぼろは調理後の重量です。',
       calm: true,
     })
   }
