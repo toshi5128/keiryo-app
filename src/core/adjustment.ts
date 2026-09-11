@@ -19,6 +19,8 @@ import { addLogDays, weekStart } from './dateBoundary'
 import { applyAdjustment, fixedWeekAverage, MIN_DAYS_FOR_JUDGMENT } from './calc'
 import type { ReviewResult, WeighIn } from './calc'
 import type { NutritionPlan } from './types'
+import { appetiteCheck } from './dailyChecks'
+import type { AppetitePressure } from './dailyChecks'
 
 /** 打った手の種類 */
 export type AdjustmentKind = 'kcal' | 'cardio'
@@ -58,6 +60,8 @@ export interface AdjustmentOffer {
   options: AdjustmentOption[]
   /** 出さない／選ばせない理由（すでに今週打った、など） */
   note?: string
+  /** ★削る前に見せる注意（空腹が続いている等）。選択肢の上に出す */
+  warning?: { title: string; body: string }
 }
 
 /**
@@ -127,7 +131,9 @@ export function buildAdjustmentOffer(
   review: ReviewResult | null,
   plan: NutritionPlan,
   history: AdjustmentLog[],
-  logDate: string
+  logDate: string,
+  /** ★空腹が続いているか。削る提案の前に警告し、有酸素を先に出すために使う */
+  appetite?: AppetitePressure
 ): AdjustmentOffer {
   const none: AdjustmentOffer = { show: false, title: '', body: '', options: [] }
   if (!review) return none
@@ -171,20 +177,33 @@ export function buildAdjustmentOffer(
   }
 
   // 停滞して減らす場面。★どちらか一方しか選べないことを明記する
+  const cardioOption: AdjustmentOption = {
+    kind: 'cardio',
+    label: '有酸素を足す',
+    detail: '目標カロリーは変えません。週に2〜3回、20〜30分の有酸素を足して、来週の平均で確かめます。',
+    deltaKcal: 0,
+  }
+
+  // ★空腹が続いているなら、削るほうを勧めない。順番を入れ替えて有酸素を先に出す。
+  //   体が「もう限界」と言っているときに削ると、続かなくなって全部が終わる。
+  //   ただし選択肢自体は残す。最終的に決めるのは本人。
+  const warn = appetite ? appetiteCheck(appetite) : null
+  if (warn) {
+    return {
+      show: true,
+      title: '2週連続で停滞しています',
+      body: 'どちらか一方を選んでください。両方を同時にやると、どちらが効いたのか分からなくなります。',
+      warning: { title: warn.title, body: warn.body },
+      options: [cardioOption, kcalOption],
+      note: '★どちらを選んでも、効いたかどうかが分かるのは来週です。1週間は追加で何もしないでください。',
+    }
+  }
+
   return {
     show: true,
     title: '2週連続で停滞しています',
     body: 'どちらか一方を選んでください。両方を同時にやると、どちらが効いたのか分からなくなります。',
-    options: [
-      kcalOption,
-      {
-        kind: 'cardio',
-        label: '有酸素を足す',
-        detail:
-          '目標カロリーは変えません。週に2〜3回、20〜30分の有酸素を足して、来週の平均で確かめます。',
-        deltaKcal: 0,
-      },
-    ],
+    options: [kcalOption, cardioOption],
     note: '★どちらを選んでも、効いたかどうかが分かるのは来週です。1週間は追加で何もしないでください。',
   }
 }

@@ -172,3 +172,81 @@ export function checkMonotony(
     },
   }
 }
+
+// ===========================================================================
+// ⑤ 食欲と睡眠（★削りすぎの一番早いサイン）
+// ===========================================================================
+
+/**
+ * ★なぜ食欲を記録するのか。
+ *
+ * 「削りすぎ」を最初に教えてくれるのは体重でも体組成計でもない。
+ *   体重に出る   … 2週間後
+ *   体組成計     … 機種で13.7%と18.2%に割れる（当てにならない）
+ *   異常な空腹感 … ★その日に分かる
+ *
+ * 引き継ぎ書 §7 の安全弁は「骨格筋が2週で-0.5kg」だが、その骨格筋を測る
+ * 体組成計が信用できない以上、安全弁が実質作動しない。食欲はその代わりになる。
+ *
+ * ★ただし食欲だけでカロリーを動かしはしない。「削る提案を出す前に警告する」だけ。
+ *   空腹は気分や睡眠でも動くので、単独で決め手にはしない。
+ */
+export type Appetite = 'low' | 'normal' | 'high'
+
+export const APPETITE_LABELS: Record<Appetite, string> = {
+  low: '少ない',
+  normal: 'ふつう',
+  high: 'やたら減る',
+}
+
+/** 直近これだけの日数を見る */
+export const APPETITE_WINDOW_DAYS = 7
+/** この日数以上「やたら減る」が続いたら、削る提案の前に警告する */
+export const APPETITE_HIGH_DAYS_WARN = 4
+/** 判断に足りる最低の記録日数。記録が少ないうちは何も言わない */
+export const APPETITE_MIN_RECORDS = 4
+
+export interface AppetitePressure {
+  /** 直近の窓のうち「やたら減る」だった日数 */
+  highDays: number
+  /** 記録があった日数 */
+  recorded: number
+  /** ★削る提案を止めるべきか */
+  strained: boolean
+}
+
+/** @param recent 新しい順に並べた直近の食欲（未記録は undefined） */
+export function appetitePressure(recent: (Appetite | undefined)[]): AppetitePressure {
+  const window = recent.slice(0, APPETITE_WINDOW_DAYS)
+  const recorded = window.filter((a) => a != null).length
+  const highDays = window.filter((a) => a === 'high').length
+  return {
+    highDays,
+    recorded,
+    strained: recorded >= APPETITE_MIN_RECORDS && highDays >= APPETITE_HIGH_DAYS_WARN,
+  }
+}
+
+/** 画面に出す食欲の注意。停滞して削る場面で使う */
+export function appetiteCheck(p: AppetitePressure): Check | null {
+  if (!p.strained) return null
+  return {
+    level: 'warn',
+    title: `ここ${APPETITE_WINDOW_DAYS}日のうち ${p.highDays}日、空腹が強い日が続いています`,
+    body:
+      'ここでカロリーを削ると、続かなくなる可能性があります。' +
+      '先に有酸素のほうを試すか、1週間ようすを見るのをお勧めします。',
+  }
+}
+
+// ---- 睡眠 --------------------------------------------------------------
+
+/**
+ * 睡眠は判定には使わない。「ベンチが落ちた日は寝ていない日だった」を
+ * あとから見て納得するための材料として残すだけ。
+ */
+export const SLEEP_SHORT_H = 6
+
+export function isShortSleep(hours: number | undefined): boolean {
+  return hours != null && hours > 0 && hours < SLEEP_SHORT_H
+}

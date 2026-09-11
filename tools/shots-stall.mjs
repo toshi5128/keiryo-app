@@ -68,8 +68,27 @@ await page.evaluate(() => {
     ...raw,
     weights,
     adjustments: [],
-    bench: [{ logDate: today, weightKg: 125, reps: 1 }],
-    days: { [today]: { wakeAt: new Date(now.getTime() - 3 * 3600 * 1000).toISOString(), trained: true } },
+    // ★直近3回のうち最後が不調（寝不足で 100kg×3回）。判定が動かないことを見る
+    bench: [
+      { logDate: fmt(new Date(t.getTime() - 14 * 86400000)), weightKg: 115, reps: 2 },
+      { logDate: fmt(new Date(t.getTime() - 7 * 86400000)), weightKg: 125, reps: 1 },
+      { logDate: today, weightKg: 100, reps: 3 },
+    ],
+    // ★空腹が続いている状態（直近7日のうち4日が「やたら減る」）
+    days: (() => {
+      const out = {}
+      const appetites = ['high', 'high', 'normal', 'high', 'high', 'normal', 'normal']
+      appetites.forEach((a, i) => {
+        const d = fmt(new Date(t.getTime() - i * 86400000))
+        out[d] = { appetite: a, sleepHours: i === 0 ? 4.5 : 7 }
+      })
+      out[today] = {
+        ...out[today],
+        wakeAt: new Date(now.getTime() - 3 * 3600 * 1000).toISOString(),
+        trained: true,
+      }
+      return out
+    })(),
   }))
 })
 await page.reload({ waitUntil: 'networkidle0' })
@@ -108,6 +127,24 @@ if (clicked) {
   await new Promise((r) => setTimeout(r, 600))
   await page.screenshot({ path: OUT.replace(/\.png$/, '-after.png') })
 }
+// ベンチ（直近3回・最後が不調）と 今日の調子 も撮る
+async function shotCard(tab, card, file) {
+  await page.evaluate((t) => {
+    const b = [...document.querySelectorAll('.tabs button')].find((x) => x.textContent.includes(t))
+    b?.click()
+  }, tab)
+  await new Promise((r) => setTimeout(r, 900))
+  await page.evaluate((c) => {
+    const v = document.querySelector('.view')
+    const t = [...document.querySelectorAll('.card-h .t')].find((e) => e.textContent.includes(c))
+    if (t && v) v.scrollTop = t.closest('.card').offsetTop - 24
+  }, card)
+  await new Promise((r) => setTimeout(r, 700))
+  await page.screenshot({ path: OUT.replace(/\.png$/, file) })
+}
+await shotCard('からだ', 'ベンチプレス', '-bench.png')
+await shotCard('今日', '今日の調子', '-condition.png')
+
 console.log(clicked ? 'clicked -100kcal' : 'button not found')
 console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors')
 await browser.close()

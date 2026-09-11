@@ -13,6 +13,7 @@ import type { NutritionPlan } from './core/types'
 import type { Food } from './core/types'
 import { formatLogDate, toLogDate, weekStart } from './core/dateBoundary'
 import type { AdjustmentKind, AdjustmentLog } from './core/adjustment'
+import type { Appetite } from './core/dailyChecks'
 import { SEED_FOODS, SEED_VERSION } from './data/seedFoods'
 import { SEED_WEIGHTS } from './data/seedWeights'
 import {
@@ -76,6 +77,10 @@ export interface BenchLog {
 export interface DayInfo {
   wakeAt?: string
   trained?: boolean
+  /** ★その日の食欲。削りすぎの一番早いサイン（体重に出るのは2週間後） */
+  appetite?: Appetite
+  /** 睡眠時間。判定には使わず「ベンチが落ちた日は寝ていない日だった」を見るため */
+  sleepHours?: number
 }
 
 /** 水分。★水・お茶・コーヒー・プロテイン・汁物の汁を数える（v4 §3） */
@@ -443,3 +448,21 @@ export function undoAdjustment(state: AppState, id: string): AppState {
 }
 
 export type { AdjustmentKind, AdjustmentLog }
+
+// ===========================================================================
+// 食欲・睡眠（★削りすぎの早期サイン）
+// ===========================================================================
+
+export function setDayInfo(state: AppState, logDate: string, patch: Partial<DayInfo>): AppState {
+  return {
+    ...state,
+    days: { ...state.days, [logDate]: { ...state.days[logDate], ...patch } },
+  }
+}
+
+/** 新しい順に並べた直近の食欲。未記録の日は undefined が入る */
+export function recentAppetite(state: AppState, endLogDate: string, days: number): (Appetite | undefined)[] {
+  return recentDates(endLogDate, days).map((d) => state.days[d]?.appetite)
+}
+
+export type { Appetite }

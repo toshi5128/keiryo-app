@@ -4,6 +4,7 @@ import {
   explainWeightChange,
   estimateOneRepMax,
   judgeBench,
+  judgeBenchTrend,
   remainingMeals,
   KCAL_PER_FAT_KG,
 } from '../src/core/weightJudge'
@@ -257,5 +258,86 @@ describe('★起床を起点にした相対スケジュール', () => {
   it('★境界直前（深夜3:50）はもう1食しか入らない', () => {
     const late = new Date(2026, 7, 16, 23, 0)
     expect(remainingMeals(late, new Date(2026, 7, 17, 3, 50), 1)).toBe(1)
+  })
+})
+
+// ===========================================================================
+
+describe('★ベンチも日々の変動で判断しない（直近3回のうちベストで見る）', () => {
+  const b = (logDate: string, weightKg: number, reps: number) => ({ logDate, weightKg, reps })
+
+  it('記録が無ければ促すだけ', () => {
+    const r = judgeBenchTrend([])
+    expect(r.kcalAdjustment).toBe(0)
+    expect(r.recentSet).toBeNull()
+  })
+
+  it('★寝不足の日の1回で判定が動かない', () => {
+    // 9/8 に 125kg×1回（ベスト）→ 9/15 は寝不足で 100kg×3回
+    const r = judgeBenchTrend([
+      b('2026-09-01', 115, 2),
+      b('2026-09-08', 125, 1),
+      b('2026-09-15', 100, 3), // 不調の日
+    ])
+    expect(r.verdict).toBe('holding')
+    // 不調の日ではなく、3回のうち一番強い回で判定している
+    expect(r.recentSet?.logDate).toBe('2026-09-08')
+    expect(r.e1RM).toBe(125)
+    expect(r.message).not.toContain('一時停止')
+  })
+
+  it('最新1回だけで見ると誤判定することを確かめておく', () => {
+    // 同じデータでも「最後の1回」だけ見ると低下に化ける（v3 の挙動）
+    const latestOnly = judgeBench(b('2026-09-15', 100, 3), estimateOneRepMax(125, 1))
+    expect(latestOnly.verdict).toBe('big_drop')
+  })
+
+  it('3回とも落ちていれば、きちんと低下と出す', () => {
+    const r = judgeBenchTrend([
+      b('2026-08-01', 125, 3),
+      b('2026-08-08', 125, 2),
+      b('2026-09-01', 100, 2),
+      b('2026-09-08', 95, 3),
+      b('2026-09-15', 100, 1),
+    ])
+    expect(r.verdict).toBe('big_drop')
+    expect(r.kcalAdjustment).toBe(200)
+  })
+
+  it('比べる相手は「それ以前のベスト」', () => {
+    const r = judgeBenchTrend([
+      b('2026-08-01', 130, 1), // 以前のベスト
+      b('2026-09-01', 120, 1),
+      b('2026-09-08', 120, 1),
+      b('2026-09-15', 120, 1),
+    ])
+    expect(r.baselineE1RM).toBe(130)
+    expect(r.e1RM).toBe(120)
+  })
+
+  it('過去の記録が3回に満たないうちは基準(100kg×7)と比べる', () => {
+    const r = judgeBenchTrend([b('2026-09-15', 125, 1)])
+    expect(r.baselineE1RM).toBeCloseTo(123.3, 1)
+    expect(r.verdict).toBe('holding')
+  })
+
+  it('重量より「推定1RM」が強い回を選ぶ（120kg×2回 は 125kg×1回 より強い）', () => {
+    const r = judgeBenchTrend([
+      b('2026-09-01', 120, 2), // 128.0kg相当
+      b('2026-09-08', 125, 1), // 125.0kg相当
+      b('2026-09-15', 100, 3), // 110.0kg相当
+    ])
+    expect(r.recentSet?.logDate).toBe('2026-09-01')
+    expect(r.e1RM).toBe(128)
+  })
+
+  it('どの回で判定したかを説明する', () => {
+    const r = judgeBenchTrend([
+      b('2026-09-01', 120, 2),
+      b('2026-09-08', 125, 1),
+      b('2026-09-15', 100, 3),
+    ])
+    expect(r.basis).toContain('直近3回のうちベスト')
+    expect(r.basis).toContain('1回の不調では判定は動きません')
   })
 })

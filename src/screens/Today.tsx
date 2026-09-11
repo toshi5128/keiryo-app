@@ -19,6 +19,7 @@ import {
   mealFromFood,
   mealsOf,
   recentDates,
+  setDayInfo,
   standardMealLogs,
   standardShakeLog,
   sumMeals,
@@ -34,13 +35,14 @@ import {
   standardMealMacros,
 } from '../core/standardMenu'
 import {
+  APPETITE_LABELS,
   WATER_QUICK_ML,
   checkFirstMeal,
   checkMonotony,
   checkSalt,
   checkWater,
 } from '../core/dailyChecks'
-import type { Check } from '../core/dailyChecks'
+import type { Appetite, Check } from '../core/dailyChecks'
 
 const hhmm = (d: Date) =>
   `${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`
@@ -279,6 +281,15 @@ export function Today() {
     })
   }
 
+  /** ★その日の食欲。3択だけ。押し直せる */
+  function setAppetite(a: Appetite) {
+    update((st) => setDayInfo(st, today, { appetite: day.appetite === a ? undefined : a }))
+  }
+
+  function setSleep(hours: number) {
+    update((st) => setDayInfo(st, today, { sleepHours: hours }))
+  }
+
   function recordMeal(index: number) {
     const meal = result.meals[index]
     if (!meal) return
@@ -432,6 +443,40 @@ export function Today() {
         </div>
         <p className="hint" style={{ marginTop: 10 }}>
           数えるのは 水・お茶・コーヒー・プロテイン・汁物の汁。食品に含まれる水分は数えません。
+        </p>
+      </div>
+
+      {/* ★今日の調子。削りすぎは体重より先に「空腹」に出る（体重に出るのは2週間後） */}
+      <div className="card">
+        <div className="card-h">
+          <div className="t">
+            今日の調子<span>あとで効いてくる</span>
+          </div>
+          <div className="s">
+            {day.appetite ? APPETITE_LABELS[day.appetite] : '未記録'}
+          </div>
+        </div>
+        <div className="acts" style={{ marginTop: 4 }}>
+          {(Object.keys(APPETITE_LABELS) as Appetite[]).map((a) => (
+            <button key={a} aria-pressed={day.appetite === a} onClick={() => setAppetite(a)}>
+              <i>食欲</i>
+              {APPETITE_LABELS[a]}
+            </button>
+          ))}
+        </div>
+        <div className="field" style={{ marginTop: 10 }}>
+          <label>昨夜の睡眠（時間）</label>
+          <input
+            inputMode="decimal"
+            value={day.sleepHours ?? ''}
+            onChange={(e) => setSleep(Number(e.target.value) || 0)}
+            placeholder="6.5"
+          />
+        </div>
+        <p className="hint">
+          空腹が続く日は、体が「これ以上削るな」と言っているサインです。停滞したときに
+          カロリーを削るか有酸素にするかの判断材料になります。睡眠は判定には使いません
+          （ベンチが落ちた日が寝ていない日だったか、あとで見るためです）。
         </p>
       </div>
 

@@ -15,6 +15,8 @@ import {
 } from '../src/core/adjustment'
 import type { AdjustmentLog } from '../src/core/adjustment'
 import { buildPlan, reviewWeek } from '../src/core/calc'
+import { appetitePressure } from '../src/core/dailyChecks'
+import type { Appetite } from '../src/core/dailyChecks'
 import type { WeighIn } from '../src/core/calc'
 
 const PLAN = buildPlan({ body: { weightKg: 83.3, bodyFatPct: 15.7 } })
@@ -184,5 +186,48 @@ describe('★体組成計は機種をまたいで比べない（v4 §9）', () =
       { logDate: '2026-09-12', weightKg: 80.6, skeletalMuscleKg: 39.9, deviceName: '自宅' },
     ]
     expect(skeletalMuscleChange2Weeks(w, TODAY)).toBeNull()
+  })
+})
+
+describe('★空腹が続いているときは、削るほうを勧めない', () => {
+  const review = reviewWeek({ thisWeekAvgKg: 81.0, lastWeekAvgKg: 81.0, stalledLastWeek: true })
+  const hi: Appetite = 'high'
+  const ok: Appetite = 'normal'
+  const strained = appetitePressure([hi, hi, hi, hi, ok, ok, ok])
+  const fine = appetitePressure([ok, ok, ok, ok, ok, ok, ok])
+
+  it('削る前に警告を出す', () => {
+    const offer = buildAdjustmentOffer(review, PLAN, [], TODAY, strained)
+    expect(offer.warning?.title).toContain('空腹が強い日が続いています')
+    expect(offer.warning?.body).toContain('続かなくなる可能性')
+  })
+
+  it('★有酸素を先に出す（順番を入れ替える）', () => {
+    const offer = buildAdjustmentOffer(review, PLAN, [], TODAY, strained)
+    expect(offer.options.map((o) => o.kind)).toEqual(['cardio', 'kcal'])
+  })
+
+  it('★それでも選択肢は残す。決めるのは本人', () => {
+    const offer = buildAdjustmentOffer(review, PLAN, [], TODAY, strained)
+    expect(offer.options.map((o) => o.kind)).toContain('kcal')
+  })
+
+  it('空腹がふつうなら順番は変えず、警告も出さない', () => {
+    const offer = buildAdjustmentOffer(review, PLAN, [], TODAY, fine)
+    expect(offer.warning).toBeUndefined()
+    expect(offer.options.map((o) => o.kind)).toEqual(['kcal', 'cardio'])
+  })
+
+  it('食欲を渡さなくても従来どおり動く', () => {
+    const offer = buildAdjustmentOffer(review, PLAN, [], TODAY)
+    expect(offer.options.map((o) => o.kind)).toEqual(['kcal', 'cardio'])
+  })
+
+  it('★増やす場面では空腹の警告で邪魔しない', () => {
+    const tooFast = reviewWeek({ thisWeekAvgKg: 80.1, lastWeekAvgKg: 81.0 })
+    const offer = buildAdjustmentOffer(tooFast, PLAN, [], TODAY, strained)
+    expect(offer.warning).toBeUndefined()
+    expect(offer.options).toHaveLength(1)
+    expect(offer.options[0].deltaKcal).toBe(150)
   })
 })

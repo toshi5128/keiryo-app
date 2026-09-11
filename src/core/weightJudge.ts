@@ -197,6 +197,58 @@ export function judgeBench(
   }
 }
 
+/**
+ * ★調子の波を吸収してから判定する（直近N回のうちのベストで見る）
+ *
+ * 体重は7日平均で見るのに、ベンチだけ「最後に記録した1回」で見ていた。
+ * これだと寝不足の日に 100kg×3回 と記録しただけで
+ * 「低下。減量の一時停止を検討してください」が出てしまう。
+ * 昨日 +1.2kg だったから落としすぎ、と言うのと同じ間違い。
+ *
+ * 筋力は「その期間に一度でも出せたなら維持できている」と読むのが正しいので、
+ *   直近N回のうちのベスト  vs  それ以前のベスト
+ * で比べる。1回の不調では判定が動かない。
+ */
+export const BENCH_RECENT_COUNT = 3
+
+export interface BenchEntry {
+  logDate: string
+  weightKg: number
+  reps: number
+}
+
+function bestOf(entries: BenchEntry[]): BenchEntry | null {
+  if (entries.length === 0) return null
+  return entries.reduce((a, b) =>
+    estimateOneRepMax(b.weightKg, b.reps) > estimateOneRepMax(a.weightKg, a.reps) ? b : a
+  )
+}
+
+export function judgeBenchTrend(entries: BenchEntry[], recentCount = BENCH_RECENT_COUNT) {
+  if (entries.length === 0) {
+    return { ...judgeBench(null), basis: '', recentSet: null as BenchEntry | null, samples: [] as BenchEntry[] }
+  }
+  const sorted = [...entries].sort((a, b) => a.logDate.localeCompare(b.logDate))
+  const recent = sorted.slice(-recentCount)
+  const prior = sorted.slice(0, -recentCount)
+  const recentSet = bestOf(recent)!
+  const priorBestSet = bestOf(prior)
+  // 以前の記録が無いうちは基準(100kg×7)と比べる
+  const baseline = priorBestSet
+    ? estimateOneRepMax(priorBestSet.weightKg, priorBestSet.reps)
+    : BENCH_BASELINE_E1RM
+  const judged = judgeBench(recentSet, baseline)
+  return {
+    ...judged,
+    recentSet,
+    samples: recent,
+    basis:
+      recent.length > 1
+        ? `直近${recent.length}回のうちベストで見ています（${recentSet.weightKg}kg × ${recentSet.reps}回）。1回の不調では判定は動きません`
+        : '記録が1回だけなので、基準と比べています',
+  }
+}
+
 // ===========================================================================
 // 起床からの相対スケジュール（仕様書 §2）
 // ===========================================================================

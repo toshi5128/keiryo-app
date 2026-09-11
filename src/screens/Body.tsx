@@ -9,16 +9,18 @@
 import { useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { compareFixedWeeks, goalFromTargetBodyFat, movingAverage, reviewWeek } from '../core/calc'
-import { estimateOneRepMax, explainWeightChange, judgeBench } from '../core/weightJudge'
+import { explainWeightChange, judgeBenchTrend } from '../core/weightJudge'
 import {
   buildAdjustmentOffer,
   skeletalMuscleChange2Weeks,
   wasStalledLastWeek,
 } from '../core/adjustment'
 import type { AdjustmentOption } from '../core/adjustment'
+import { appetitePressure, isShortSleep } from '../core/dailyChecks'
 import {
   applyKcalAdjustment,
   mealsOf,
+  recentAppetite,
   recentDates,
   recordCardioChoice,
   sumMeals,
@@ -78,10 +80,16 @@ export function Body() {
     })
   }, [weeks, weights, today])
 
+  /** ★空腹が続いているか。削る提案を出す前の歯止めに使う */
+  const appetite = useMemo(
+    () => appetitePressure(recentAppetite(state, today, 7)),
+    [state, today]
+  )
+
   // ★判定から「押せる選択肢」を作る。実行するのは本人（v4 §7）
   const offer = useMemo(
-    () => buildAdjustmentOffer(review, plan, state.adjustments, today),
-    [review, plan, state.adjustments, today]
+    () => buildAdjustmentOffer(review, plan, state.adjustments, today, appetite),
+    [review, plan, state.adjustments, today, appetite]
   )
 
   function choose(opt: AdjustmentOption) {
@@ -133,18 +141,13 @@ export function Body() {
   )
 
   const goal = goalFromTargetBodyFat(plan.lbmKg, state.profile.weightKg, state.profile.targetBodyFatPct)
-  const benchLatest = state.bench[state.bench.length - 1] ?? null
   /**
-   * ★比べる相手はこれまでの自己ベスト（推定1RM）。
-   * 「重量が維持〜向上している限り、筋肉は落ちていない」(v4 §7) を機械的に見るため、
-   * 重量と回数を推定1RMにまとめてから比べる。回数だけで見ると
-   * 125kg×1回（自己ベスト）が「低下」に化ける。
+   * ★ベンチも「日々の変動で判断しない」。体重が7日平均なのと同じ考え方。
+   * 直近3回のうちのベスト vs それ以前のベスト で比べるので、
+   * 寝不足の日に 100kg×3回 と記録しても判定は動かない。
    */
-  const benchBest = useMemo(() => {
-    const all = state.bench.map((b) => estimateOneRepMax(b.weightKg, b.reps))
-    return all.length ? Math.max(...all) : undefined
-  }, [state.bench])
-  const benchJudge = judgeBench(benchLatest, benchBest)
+  const benchJudge = useMemo(() => judgeBenchTrend(state.bench), [state.bench])
+  const benchLatest = state.bench[state.bench.length - 1] ?? null
 
   function saveWeight() {
     const kg = Number(w)
@@ -326,6 +329,13 @@ export function Body() {
             <b style={{ display: 'block', marginBottom: 4 }}>{offer.title}</b>
             {offer.body}
           </div>
+          {/* ★体が「もう限界」と言っているときに削らせない。選択肢の上に出す */}
+          {offer.warning && (
+            <div className="log" style={{ marginBottom: 12 }}>
+              <b>{offer.warning.title}</b>
+              {offer.warning.body}
+            </div>
+          )}
           {offer.options.map((opt) => (
             <div key={opt.kind} style={{ marginBottom: 10 }}>
               <button className="primary" style={{ marginBottom: 6 }} onClick={() => choose(opt)}>
@@ -435,10 +445,9 @@ export function Body() {
         {benchLatest && (
           <div className="item">
             <span>
-              {benchLatest.weightKg}kg × {benchLatest.reps}回
+              {benchJudge.recentSet?.weightKg}kg × {benchJudge.recentSet?.reps}回
               <span className="sub2">
-                {benchJudge.e1RM}kg相当
-                {benchBest != null && ` ／ 自己ベスト ${benchBest}kg相当`}
+                {benchJudge.e1RM}kg相当 ／ 基準 {benchJudge.baselineE1RM}kg相当
               </span>
             </span>
             <span className={`amt ${benchJudge.verdict === 'holding' ? 'ok' : 'warn'}`}>
@@ -449,6 +458,33 @@ export function Body() {
         <div className="explain" style={{ marginBottom: 12 }}>
           {benchJudge.message}
         </div>
+        {/* ★見ている3回を並べる。どの回で判定しているかが分かるように。
+            睡眠が短い日には印を付ける（落ちた日が寝ていない日だったか後から分かる） */}
+        {benchJudge.samples.length > 1 && (
+          <>
+            {benchJudge.samples
+              .slice()
+              .reverse()
+              .map((b) => {
+                const sleep = state.days[b.logDate]?.sleepHours
+                const best = b.logDate === benchJudge.recentSet?.logDate
+                return (
+                  <div className="item" key={b.logDate + b.weightKg + b.reps}>
+                    <span style={{ color: best ? undefined : 'var(--dim)' }}>
+                      {b.logDate.slice(5).replace('-', '/')} {b.weightKg}kg × {b.reps}回
+                      {best && ' ★この回で判定'}
+                      {isShortSleep(sleep) && (
+                        <span className="sub2">睡眠 {sleep}時間（短い）</span>
+                      )}
+                    </span>
+                  </div>
+                )
+              })}
+            <p className="hint" style={{ marginTop: 8 }}>
+              {benchJudge.basis}
+            </p>
+          </>
+        )}
         <div className="row">
           <div className="field">
             <label>重量 kg</label>
