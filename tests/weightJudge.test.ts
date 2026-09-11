@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSchedule,
   explainWeightChange,
+  estimateOneRepMax,
   judgeBench,
   remainingMeals,
   KCAL_PER_FAT_KG,
@@ -161,6 +162,52 @@ describe('★ベンチプレス連動', () => {
 
   it('記録が無いときは責めずに促す', () => {
     expect(judgeBench(null).kcalAdjustment).toBe(0)
+  })
+
+  // -------------------------------------------------------------------
+  // ★重量と回数は推定1RMにまとめてから比べる
+  //   v3 は「基準の重量以上か → 回数が7回以上か」で見ていたため、
+  //   125kg×1回（自己ベスト）を「100kgが1回まで落ちています」と誤判定していた。
+  //   PR を出した日に「減量を一時停止」と言うのは実害がある。
+  // -------------------------------------------------------------------
+  it('推定1RM: 100kg×7回 は 123.3kg 相当', () => {
+    expect(estimateOneRepMax(100, 7)).toBeCloseTo(123.3, 1)
+  })
+
+  it('推定1RM: 1回のときは重量そのもの', () => {
+    expect(estimateOneRepMax(125, 1)).toBe(125)
+  })
+
+  it('★125kg×1回（v4 §7 の直近実績）は「低下」ではなく「維持〜向上」', () => {
+    const r = judgeBench({ weightKg: 125, reps: 1 })
+    expect(r.verdict).toBe('holding')
+    expect(r.kcalAdjustment).toBe(0)
+    expect(r.message).toContain('筋肉は落ちていません')
+    expect(r.message).not.toContain('一時停止')
+  })
+
+  it('★重い重量を少ない回数で挙げた日に「減量を止めろ」と言わない', () => {
+    for (const set of [
+      { weightKg: 120, reps: 2 },
+      { weightKg: 130, reps: 1 },
+      { weightKg: 110, reps: 4 },
+    ]) {
+      expect(judgeBench(set).verdict, `${set.weightKg}kg×${set.reps}`).toBe('holding')
+    }
+  })
+
+  it('軽い重量しか挙がらない日はきちんと低下と出す', () => {
+    expect(judgeBench({ weightKg: 80, reps: 5 }).verdict).toBe('big_drop')
+  })
+
+  it('比べる相手（自己ベスト）を渡せる', () => {
+    // 自己ベストが 125kg 相当なら、100kg×7回（123.3kg相当）は わずかに下
+    const best = estimateOneRepMax(125, 1)
+    const r = judgeBench({ weightKg: 100, reps: 7 }, best)
+    expect(r.verdict).toBe('slight_drop')
+    expect(r.baselineE1RM).toBe(best)
+    // さらに落ちれば「低下」に変わる
+    expect(judgeBench({ weightKg: 100, reps: 3 }, best).verdict).toBe('big_drop')
   })
 })
 

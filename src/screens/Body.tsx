@@ -9,14 +9,30 @@
 import { useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { compareFixedWeeks, goalFromTargetBodyFat, movingAverage, reviewWeek } from '../core/calc'
-import { explainWeightChange, judgeBench } from '../core/weightJudge'
-import { mealsOf, recentDates, sumMeals, useStore } from '../store'
+import { estimateOneRepMax, explainWeightChange, judgeBench } from '../core/weightJudge'
+import {
+  buildAdjustmentOffer,
+  skeletalMuscleChange2Weeks,
+  wasStalledLastWeek,
+} from '../core/adjustment'
+import type { AdjustmentOption } from '../core/adjustment'
+import {
+  applyKcalAdjustment,
+  mealsOf,
+  recentDates,
+  recordCardioChoice,
+  sumMeals,
+  undoAdjustment,
+  useStore,
+} from '../store'
 
 export function Body() {
   const { state, update, today, plan } = useStore()
   const [w, setW] = useState('')
   const [bf, setBf] = useState('')
   const [smm, setSmm] = useState('')
+  // ★体組成計の機種名。同じ日に3台で13.7%と18.2%に割れた実績があるので必須（v4 §9）
+  const [device, setDevice] = useState('')
   const [isRef, setIsRef] = useState(false)
   const [bench, setBench] = useState({ weightKg: '100', reps: '' })
 
@@ -47,10 +63,36 @@ export function Body() {
   // ★判定は固定週どうしの比較で出す（v4 §7）。移動窓だと毎日答えが動いてしまう。
   //   グラフに引く7日移動平均線（movingAverage）は今までどおり移動窓のまま。
   const weeks = useMemo(() => compareFixedWeeks(weights, today), [weights, today])
-  const review =
-    weeks.ready && weeks.thisWeek.avgKg != null && weeks.lastWeek.avgKg != null
-      ? reviewWeek({ thisWeekAvgKg: weeks.thisWeek.avgKg, lastWeekAvgKg: weeks.lastWeek.avgKg })
-      : null
+
+  /**
+   * ★判定には「前の週も停滞だったか」と「骨格筋の2週変化」を必ず渡す。
+   * 渡さないと ①1週目の停滞でカロリーを削ってしまう ②安全弁が効かない。
+   */
+  const review = useMemo(() => {
+    if (!weeks.ready || weeks.thisWeek.avgKg == null || weeks.lastWeek.avgKg == null) return null
+    return reviewWeek({
+      thisWeekAvgKg: weeks.thisWeek.avgKg,
+      lastWeekAvgKg: weeks.lastWeek.avgKg,
+      stalledLastWeek: wasStalledLastWeek(weights, today),
+      smmChange2WeeksKg: skeletalMuscleChange2Weeks(weights, today),
+    })
+  }, [weeks, weights, today])
+
+  // ★判定から「押せる選択肢」を作る。実行するのは本人（v4 §7）
+  const offer = useMemo(
+    () => buildAdjustmentOffer(review, plan, state.adjustments, today),
+    [review, plan, state.adjustments, today]
+  )
+
+  function choose(opt: AdjustmentOption) {
+    const reason = review?.message ?? ''
+    if (opt.kind === 'kcal' && opt.nextKcal != null) {
+      const next = opt.nextKcal
+      update((s) => applyKcalAdjustment(s, plan.kcal, next, reason, today))
+    } else {
+      update((s) => recordCardioChoice(s, reason, today))
+    }
+  }
 
   // ---- 水分変動の自動説明 ----
   const explain = useMemo(() => {
@@ -84,9 +126,25 @@ export function Body() {
     })
   }, [latest, prev, state, today, plan])
 
+  /** これまでに使った体組成計の機種名（入力候補に出す） */
+  const deviceNames = useMemo(
+    () => [...new Set(weights.map((x) => x.deviceName).filter((d): d is string => !!d))],
+    [weights]
+  )
+
   const goal = goalFromTargetBodyFat(plan.lbmKg, state.profile.weightKg, state.profile.targetBodyFatPct)
   const benchLatest = state.bench[state.bench.length - 1] ?? null
-  const benchJudge = judgeBench(benchLatest)
+  /**
+   * ★比べる相手はこれまでの自己ベスト（推定1RM）。
+   * 「重量が維持〜向上している限り、筋肉は落ちていない」(v4 §7) を機械的に見るため、
+   * 重量と回数を推定1RMにまとめてから比べる。回数だけで見ると
+   * 125kg×1回（自己ベスト）が「低下」に化ける。
+   */
+  const benchBest = useMemo(() => {
+    const all = state.bench.map((b) => estimateOneRepMax(b.weightKg, b.reps))
+    return all.length ? Math.max(...all) : undefined
+  }, [state.bench])
+  const benchJudge = judgeBench(benchLatest, benchBest)
 
   function saveWeight() {
     const kg = Number(w)
@@ -97,6 +155,7 @@ export function Body() {
       weightKg: kg,
       bodyFatPct: bf ? Number(bf) : null,
       skeletalMuscleKg: smm ? Number(smm) : null,
+      deviceName: device.trim() || undefined,
       isReference: isRef,
     }
     update((s) => ({
@@ -113,6 +172,7 @@ export function Body() {
     setW('')
     setBf('')
     setSmm('')
+    // 機種名は次回も同じことが多いので残す
     setIsRef(false)
   }
 
@@ -253,6 +313,66 @@ export function Body() {
         )}
       </div>
 
+      {/* ★判定から出た手。実行するのは本人（v4 §7：カロリー削減と有酸素は同時にやらない） */}
+      {offer.show && (
+        <div className={`card${offer.options.length > 0 ? ' urgent' : ''}`}>
+          <div className="card-h">
+            <div className="t">
+              {offer.options.length > 0 ? '打てる手' : '今週の対応'}
+              <span>週に1つまで</span>
+            </div>
+          </div>
+          <div className="explain" style={{ marginBottom: offer.options.length ? 12 : 0 }}>
+            <b style={{ display: 'block', marginBottom: 4 }}>{offer.title}</b>
+            {offer.body}
+          </div>
+          {offer.options.map((opt) => (
+            <div key={opt.kind} style={{ marginBottom: 10 }}>
+              <button className="primary" style={{ marginBottom: 6 }} onClick={() => choose(opt)}>
+                {opt.label}
+              </button>
+              <p className="hint" style={{ margin: 0 }}>
+                {opt.detail}
+              </p>
+            </div>
+          ))}
+          {offer.note && <p className="hint">{offer.note}</p>}
+        </div>
+      )}
+
+      {/* ★打った手の履歴。3ヶ月後に「なんでこの数字なんだっけ」とならないように */}
+      {state.adjustments.length > 0 && (
+        <div className="card">
+          <div className="card-h">
+            <div className="t">
+              打った手の履歴<span>いつ・なぜ・いくつに</span>
+            </div>
+            <div className="s">{state.adjustments.length}件</div>
+          </div>
+          {state.adjustments.slice(0, 6).map((a) => (
+            <div className="item" key={a.id}>
+              <span>
+                {a.logDate.slice(5).replace('-', '/')}{' '}
+                {a.kind === 'kcal'
+                  ? `${a.fromKcal?.toLocaleString()} → ${a.toKcal?.toLocaleString()}kcal`
+                  : '有酸素を足す'}
+                <span className="sub2">{a.reason}</span>
+              </span>
+              <button className="ghost" onClick={() => update((st) => undoAdjustment(st, a.id))}>
+                取消
+              </button>
+            </div>
+          ))}
+          <p className="hint">
+            目標カロリーは
+            {state.profile.overrideKcal != null
+              ? `いま ${state.profile.overrideKcal.toLocaleString()}kcal に固定しています。`
+              : '自動計算のままです。'}
+            自動計算に戻すときは設定タブの「1日の目標」を空にしてください。
+          </p>
+        </div>
+      )}
+
       <div className="card">
         <div className="card-h">
           <div className="t">体重を入れる</div>
@@ -278,11 +398,31 @@ export function Body() {
             <input inputMode="decimal" value={smm} onChange={(e) => setSmm(e.target.value)} placeholder="40.1" />
           </div>
         </div>
+        {(bf || smm) && (
+          <div className="field">
+            <label>体組成計の機種（★必須）</label>
+            <input
+              value={device}
+              onChange={(e) => setDevice(e.target.value)}
+              placeholder="自宅 / FIT-EASY / InBody"
+              list="keiryo-devices"
+            />
+            <datalist id="keiryo-devices">
+              {deviceNames.map((d) => (
+                <option key={d} value={d} />
+              ))}
+            </datalist>
+            <p className="hint" style={{ marginTop: 6 }}>
+              ★機種が違うと比べられません（同じ日に3台で 13.7% と 18.2% に割れた実績があります）。
+              機種名を入れておくと、同じ機種どうしだけで判断します。
+            </p>
+          </div>
+        )}
         <label className="check">
           <input type="checkbox" checked={isRef} onChange={(e) => setIsRef(e.target.checked)} />
           条件が違う（参考値にする。7日平均から外れます）
         </label>
-        <button className="primary" onClick={saveWeight} disabled={!w}>
+        <button className="primary" onClick={saveWeight} disabled={!w || ((!!bf || !!smm) && !device.trim())}>
           記録する
         </button>
       </div>
@@ -296,6 +436,10 @@ export function Body() {
           <div className="item">
             <span>
               {benchLatest.weightKg}kg × {benchLatest.reps}回
+              <span className="sub2">
+                {benchJudge.e1RM}kg相当
+                {benchBest != null && ` ／ 自己ベスト ${benchBest}kg相当`}
+              </span>
             </span>
             <span className={`amt ${benchJudge.verdict === 'holding' ? 'ok' : 'warn'}`}>
               {benchJudge.verdict === 'holding' ? '維持' : '低下'}

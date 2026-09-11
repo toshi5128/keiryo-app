@@ -11,7 +11,8 @@ import type { ReactNode } from 'react'
 import { buildPlan } from './core/calc'
 import type { NutritionPlan } from './core/types'
 import type { Food } from './core/types'
-import { formatLogDate, toLogDate } from './core/dateBoundary'
+import { formatLogDate, toLogDate, weekStart } from './core/dateBoundary'
+import type { AdjustmentKind, AdjustmentLog } from './core/adjustment'
 import { SEED_FOODS, SEED_VERSION } from './data/seedFoods'
 import { SEED_WEIGHTS } from './data/seedWeights'
 import {
@@ -60,6 +61,8 @@ export interface WeighIn {
   weightKg: number
   bodyFatPct?: number | null
   skeletalMuscleKg?: number | null
+  /** ★体組成計の機種名。機種が違うものを並べて比べない（v4 §9） */
+  deviceName?: string
   isReference: boolean
   note?: string
 }
@@ -90,6 +93,8 @@ export interface AppState {
   weights: WeighIn[]
   bench: BenchLog[]
   water: WaterLog[]
+  /** ★停滞・落としすぎのときに打った手の履歴。いつ・なぜ・いくつに変えたか */
+  adjustments: AdjustmentLog[]
   days: Record<string, DayInfo>
   /** 食材シードの版。上がっていたら食材だけ塗り直す */
   seedVersion?: number
@@ -119,6 +124,7 @@ function initialState(): AppState {
     weights: SEED_WEIGHTS.map((w) => ({ ...w })),
     bench: [],
     water: [],
+    adjustments: [],
     days: {},
     seedVersion: SEED_VERSION,
   }
@@ -158,6 +164,7 @@ function load(): AppState {
       weights: parsed.weights?.length ? parsed.weights : base.weights,
       bench: parsed.bench ?? [],
       water: parsed.water ?? [],
+      adjustments: parsed.adjustments ?? [],
       days: parsed.days ?? {},
       seedVersion: SEED_VERSION,
     }
@@ -376,3 +383,63 @@ export function standardShakeLog(state: AppState, at = new Date()): MealLog {
     groupId: uid(),
   }
 }
+
+// ===========================================================================
+// ★停滞したときに打つ手（v4 §7）
+// ===========================================================================
+
+/**
+ * カロリーの目標を変え、履歴に残す。
+ *
+ * ★目標は profile.overrideKcal に入れる。体重が動いても勝手に戻らないようにするため
+ *   （TDEE から引き直すと、せっかく下げた目標が翌週に元へ戻ってしまう）。
+ *   自動計算に戻したいときは設定タブで「1日の目標」を空にする。
+ */
+export function applyKcalAdjustment(
+  state: AppState,
+  fromKcal: number,
+  toKcal: number,
+  reason: string,
+  logDate: string
+): AppState {
+  const log: AdjustmentLog = {
+    id: uid(),
+    logDate,
+    weekStart: weekStart(logDate),
+    kind: 'kcal',
+    fromKcal,
+    toKcal,
+    deltaKcal: toKcal - fromKcal,
+    reason,
+  }
+  return {
+    ...state,
+    profile: { ...state.profile, overrideKcal: toKcal },
+    adjustments: [log, ...state.adjustments],
+  }
+}
+
+/** 有酸素を足す、を選んだときの記録。★目標カロリーは変えない */
+export function recordCardioChoice(state: AppState, reason: string, logDate: string): AppState {
+  const log: AdjustmentLog = {
+    id: uid(),
+    logDate,
+    weekStart: weekStart(logDate),
+    kind: 'cardio',
+    reason,
+  }
+  return { ...state, adjustments: [log, ...state.adjustments] }
+}
+
+/** 打った手を取り消す（押し間違えたとき） */
+export function undoAdjustment(state: AppState, id: string): AppState {
+  const log = state.adjustments.find((a) => a.id === id)
+  if (!log) return state
+  const rest = state.adjustments.filter((a) => a.id !== id)
+  if (log.kind !== 'kcal') return { ...state, adjustments: rest }
+  // 1つ前の kcal 調整まで戻す。無ければ自動計算へ戻す
+  const prevKcal = rest.find((a) => a.kind === 'kcal')?.toKcal ?? null
+  return { ...state, profile: { ...state.profile, overrideKcal: prevKcal }, adjustments: rest }
+}
+
+export type { AdjustmentKind, AdjustmentLog }

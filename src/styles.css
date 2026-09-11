@@ -715,3 +715,12 @@ select {
   color: var(--kinako);
   margin-top: 2px;
 }
+
+/* ★手を打つべき場面のカード。判定が出ているのに気づかないのが一番まずい */
+.card.urgent {
+  border-color: var(--kinako);
+  box-shadow: 0 0 0 1px rgba(217, 164, 65, 0.18);
+}
+.card.urgent .card-h .t {
+  color: var(--kinako);
+}

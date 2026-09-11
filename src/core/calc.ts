@@ -345,6 +345,11 @@ export interface WeighIn {
   weightKg: number
   /** 測定条件を満たさない「参考値」。移動平均から除外する */
   isReference?: boolean
+  /** 体組成計の値。★機種が違えば比較できない（同じ日に13.7%と18.2%が出た実績がある） */
+  bodyFatPct?: number | null
+  skeletalMuscleKg?: number | null
+  /** ★体組成計の機種名。これが違うものを並べて比べない（v4 §9） */
+  deviceName?: string
 }
 
 /** 直近 windowDays 日の平均。参考値フラグの立った測定は除外する。 */

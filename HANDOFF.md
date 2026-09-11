@@ -19,6 +19,12 @@ v1 / v2 / v3 と食い違ったら **v4 が勝つ**（数値そのものが変�
   生の行（`sobo_raw`）は `is_reference` で、提案にも記録候補にも出さない（買い物の量を出す専用）。
 - **判定は固定週どうしで比較する。** 移動窓で出すと毎日答えが変わり、本人が何を信じてよいか
   分からなくなる。グラフの7日移動平均線は移動窓のままでよい。動かしてはいけないのは判定のほう。
+- **停滞への対応は「提案」まで。目標カロリーを勝手に書き換えない。**
+  -100kcal と 有酸素追加 は「どちらか一方」で、どちらが正しいかはその週の都合で決まる。
+  アプリは選択肢を出し、押されたら適用して履歴に残す（`adjustment.ts` / `store.applyKcalAdjustment`）。
+  同じ週に2回は打たせない。1週目の停滞では選択肢自体を出さない。
+- **ベンチは推定1RM（Epley）で比べる。** 重量と回数を別々に見ると
+  125kg×1回（自己ベスト）が「低下」に化け、PRの日に「減量を止めろ」と言ってしまう。
 - **体重が増えた日は必ず理由を出す。** 説明が無いと自己判断でカロリーを削り始める。
 - **塩分が6gを超えたら翌朝の増加を予告する。** 予告があれば翌朝の +1kg を脂肪と誤解しない。
 - **1日オーバーで赤警告を出さない。** 週予算を超えた時だけ知らせる。UI 文言に「オーバー」を使わない。
@@ -47,6 +53,7 @@ is_excluded / in_stock=false / is_reference / category='eating_out' を提案に
 src/core/          数式だけ。画面もDBも知らない。テストはここに集中
   calc.ts          目標PFC（LBM→BMR→TDEE→P/F/C）・塩分上限・水分目標
                    ・週次レビュー・移動平均・★固定週の比較
+  adjustment.ts    ★停滞時に打てる手の組み立て（2週連続待ち・どちらか一方・週1回まで）
   solver.ts        ★心臓部。PFC目標を満たす食材の組み合わせを解く
   standardMenu.ts  ★標準メニュー（v4 §4）と買い物リスト・そぼろの生⇔調理後換算
   dailyChecks.ts   ★1食目P45警告・塩分予告・水分・同じ食材の連続検知
@@ -70,11 +77,12 @@ supabase/migrations/0001_init.sql
 ## 開発
 
 ```
-npm test          # vitest（189件）
+npm test          # vitest（215件）
 npm run build     # tsc --noEmit + vite build
 npm run dev
 node tools/shots.mjs        # 実機幅390pxで全タブ撮影（端末のChromeを使う）
 node tools/shots-alert.mjs out.png   # ★赤い警告（1食目P不足・塩分超過）が出るかの目視
+node tools/shots-stall.mjs out.png   # ★2週連続の停滞→「打てる手」が出るかの目視
 ```
 
 Node は `C:\Users\st106\AppData\Local\Programs\nodejs\node.exe`（bash の PATH 外）。
@@ -169,3 +177,24 @@ Phase 1 は **localStorage**（キー `keiryo.v1`）。水分は `water[]`、食
 「考えなくていい1パターンに固定したい」という本人の意図を守るため、
 足りないぶんを毎日その場で足す運用にはせず、配合そのものを直した。
 `tests/standardMenu.test.ts` に**元の配合では下限を割ること**を記録したテストを残してある。
+
+---
+
+## 停滞したときの流れ（2026-09-12 追加）
+
+```
+固定週の平均を比べる（compareFixedWeeks）
+  └ 2週連続で停滞？（wasStalledLastWeek）
+      ├ 1週目 → 何も出さない。「もう1週間ようすを見ます」だけ
+      └ 2週連続 → からだ画面に「打てる手」カード
+            ├ [-100kcal にする] → profile.overrideKcal を書き換え、履歴に残す
+            └ [有酸素を足す]     → 目標は変えず、選んだ事実だけ履歴に残す
+                 ※ 同じ週に2つ目は押せない（alreadyAdjustedThisWeek）
+```
+
+安全弁：骨格筋が2週で -0.5kg 以上減ったら、停滞していても **+200kcal の一択**になる。
+ただし★体組成計は機種が違うと比較しない（`skeletalMuscleChange2Weeks`）。
+体重の記録に `deviceName` が入っていて、それが一致する測定どうしでしか差を取らない。
+
+目標カロリーは `profile.overrideKcal` に入る。**自動計算に戻すときは設定タブで空にする。**
+（TDEE から引き直す方式だと、下げた目標が翌週に元へ戻ってしまうため）

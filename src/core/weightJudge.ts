@@ -117,50 +117,83 @@ export function explainWeightChange(input: ExplainInput): ExplainResult {
 // ベンチプレス（体組成計より確実な筋量の指標）
 // ===========================================================================
 
-/** 基準: ベンチプレス 100kg × 7回 */
+/** 基準: ベンチプレス 100kg × 7回（減量開始時の実力） */
 export const BENCH_BASELINE = { weightKg: 100, reps: 7 }
+
+/**
+ * ★重量と回数を1つの数字にまとめる（推定1RM・Epley式）。
+ *
+ * 「100kg×7回」と「125kg×1回」はどちらが強いのか、回数だけでは比べられない。
+ * v3 は「基準の重量(100kg)以上か」→「回数が7回以上か」で判定していたため、
+ * 125kg×1回（自己ベスト）を「100kgが1回まで落ちています」と誤って低下扱いしていた。
+ * PR を出した日に「減量を一時停止してください」と言うのは実害があるので、
+ * 重量と回数を1つの推定値に直してから比べる。
+ *
+ *   100kg × 7回 → 123.3kg 相当
+ *   125kg × 1回 → 129.2kg 相当（＝向上している）
+ */
+export function estimateOneRepMax(weightKg: number, reps: number): number {
+  if (reps <= 0) return 0
+  if (reps === 1) return weightKg
+  return Math.round(weightKg * (1 + reps / 30) * 10) / 10
+}
+
+/** 基準の推定1RM */
+export const BENCH_BASELINE_E1RM = estimateOneRepMax(BENCH_BASELINE.weightKg, BENCH_BASELINE.reps)
+
+/** この割合を下回ったら「やや低下」、さらに下回ったら「低下」 */
+export const BENCH_SLIGHT_DROP_RATIO = 0.93
 
 export type BenchVerdict = 'holding' | 'slight_drop' | 'big_drop'
 
 /**
  * 体重が動かないときに「重量が上がっているなら筋肉は落ちていない」と言えるようにする。
  * 不安を減らすのが目的なので、断定的に落ちたとは言わない。
+ *
+ * @param baselineE1RM 比べる相手。既定は基準(100kg×7)。
+ *   画面からは「これまでの自己ベスト」を渡してもよい。
  */
-export function judgeBench(current: { weightKg: number; reps: number } | null) {
+export function judgeBench(
+  current: { weightKg: number; reps: number } | null,
+  baselineE1RM = BENCH_BASELINE_E1RM
+) {
   if (!current) {
     return {
       verdict: 'holding' as BenchVerdict,
+      e1RM: null as number | null,
+      baselineE1RM,
       kcalAdjustment: 0,
       message: 'ベンチプレスの記録を入れると、筋肉が落ちていないかを体重より確実に見られます',
     }
   }
-  // 同じ重量での回数、または重量そのもので比較する
-  const sameWeight = current.weightKg >= BENCH_BASELINE.weightKg
-  if (!sameWeight) {
+  const e1RM = estimateOneRepMax(current.weightKg, current.reps)
+  const base = { e1RM, baselineE1RM }
+  const set = `${current.weightKg}kg × ${current.reps}回`
+
+  if (e1RM >= baselineE1RM) {
     return {
-      verdict: 'big_drop' as BenchVerdict,
-      kcalAdjustment: 200,
-      message: `基準の ${BENCH_BASELINE.weightKg}kg を扱えていません。減量の一時停止を検討してください`,
-    }
-  }
-  if (current.reps >= BENCH_BASELINE.reps) {
-    return {
+      ...base,
       verdict: 'holding' as BenchVerdict,
       kcalAdjustment: 0,
-      message: '重量が落ちていないので筋肉は落ちていません。体重が動かなくても設計は正しいです',
+      message:
+        e1RM > baselineE1RM
+          ? `${set}（${e1RM}kg相当）は基準の ${baselineE1RM}kg相当を上回っています。筋肉は落ちていません。体重が動かなくても設計は正しいです`
+          : `${set} は基準を維持できています。筋肉は落ちていません。体重が動かなくても設計は正しいです`,
     }
   }
-  if (current.reps >= 5) {
+  if (e1RM >= baselineE1RM * BENCH_SLIGHT_DROP_RATIO) {
     return {
+      ...base,
       verdict: 'slight_drop' as BenchVerdict,
       kcalAdjustment: 150,
-      message: `${BENCH_BASELINE.weightKg}kg が ${current.reps}回に落ちています。+150〜200kcal を提案します`,
+      message: `${set}（${e1RM}kg相当）は基準の ${baselineE1RM}kg相当をやや下回っています。+150〜200kcal を提案します`,
     }
   }
   return {
+    ...base,
     verdict: 'big_drop' as BenchVerdict,
     kcalAdjustment: 200,
-    message: `${BENCH_BASELINE.weightKg}kg が ${current.reps}回まで落ちています。減量の一時停止を検討してください`,
+    message: `${set}（${e1RM}kg相当）は基準の ${baselineE1RM}kg相当を大きく下回っています。減量の一時停止を検討してください`,
   }
 }
 
