@@ -80,31 +80,33 @@ describe('基準日（1食目を食べ終えて残り2食）', () => {
 
 // ===========================================================================
 
-describe('★鶏ももが在庫切れ → 組み直す', () => {
+// ★v4 で鶏ももは既定で除外（8/31「マジで飽きた」）になったので、
+//   在庫切れの主役は現在の主軸である「そぼろ」に置き換える。
+describe('★そぼろが在庫切れ → 組み直す', () => {
   const before = solve({ target: TARGET, eaten: MEAL1, mealCount: 2, foods: foods() })
   const after = solve({
     target: TARGET,
     eaten: MEAL1,
     mealCount: 2,
-    foods: foods({ momo: { inStock: false } }),
+    foods: foods({ sobo: { inStock: false } }),
   })
 
-  it('鶏ももが提案から消える', () => {
-    expect(names(before)).toContain('鶏もも肉（皮なし・低温調理）')
-    expect(names(after)).not.toContain('鶏もも肉（皮なし・低温調理）')
+  it('そぼろが提案から消える', () => {
+    expect(names(before)).toContain('鶏そぼろ（調理後・薄味）')
+    expect(names(after)).not.toContain('鶏そぼろ（調理後・薄味）')
   })
 
   it('別の主菜に入れ替わる', () => {
-    expect(after.mainFood?.id).not.toBe('momo')
+    expect(after.mainFood?.id).not.toBe('sobo')
     expect(after.mainFood).not.toBeNull()
   })
 
   it('タンパク質は同じだけ確保される（±5g）', () => {
-    expect(Math.abs(after.dayTotals.proteinG - 170), dump('もも切れ', after)).toBeLessThanOrEqual(5)
+    expect(Math.abs(after.dayTotals.proteinG - 170), dump('そぼろ切れ', after)).toBeLessThanOrEqual(5)
   })
 
   it('★脂質が下限 58g を割らない（モックはここで 50.5g に落ちていた）', () => {
-    expect(after.dayTotals.fatG, dump('もも切れ', after)).toBeGreaterThanOrEqual(57.5)
+    expect(after.dayTotals.fatG, dump('そぼろ切れ', after)).toBeGreaterThanOrEqual(57.5)
   })
 
   it('【絶対】制約をすべて満たす', () => {
@@ -224,55 +226,61 @@ describe('★1食の P が 80g を超えない', () => {
 
 // ===========================================================================
 
+// ★「鶏もも530g」は 8/25 に実際に出してしまい本人から指摘を受けた答え。
+//   v4 で鶏もも自体が除外されたので、主役を現在の主軸「そぼろ」に置き換えて
+//   同じ性質（上限を超えない・足りない分はプロテイン・不足は正直に報告）を検証する。
 describe('★max_amount を超えない（鶏もも530gのような答えを出さない）', () => {
-  it('主菜が鶏ももしか無くても 250g を超えない', () => {
-    const only = foods().map((f) =>
-      f.category === 'protein' && !['momo', 'egg', 'whey'].includes(f.id)
+  /** 主菜をそぼろだけに絞ったマスタ（卵とプロテインは固定要素なので残す） */
+  const soboOnly = (patch: Record<string, Partial<Food>> = {}) =>
+    foods(patch).map((f) =>
+      f.category === 'protein' && !['sobo', 'egg', 'whey'].includes(f.id)
         ? { ...f, inStock: false }
         : f
     )
-    const r = solve({ target: TARGET, eaten: {}, mealCount: 2, foods: only })
+
+  it('主菜がそぼろしか無くても1食 200g を超えない', () => {
+    const r = solve({ target: TARGET, eaten: {}, mealCount: 2, foods: soboOnly() })
     for (const m of r.meals) {
-      const momo = m.items.find((i) => i.food.id === 'momo')
-      if (momo) expect(momo.amount, dump('ももだけ', r)).toBeLessThanOrEqual(250)
+      const sobo = m.items.find((i) => i.food.id === 'sobo')
+      if (sobo) expect(sobo.amount, dump('そぼろだけ', r)).toBeLessThanOrEqual(200)
     }
   })
 
   it('上限に当たって足りないぶんはプロテインで補う', () => {
-    // 主菜が鶏ももだけ、しかも1食150gまでしか食べられない設定
-    const tight = foods({ momo: { maxAmount: 150 } }).map((f) =>
-      f.category === 'protein' && !['momo', 'egg', 'whey'].includes(f.id)
-        ? { ...f, inStock: false }
-        : f
-    )
-    const r = solve({ target: TARGET, eaten: MEAL1, mealCount: 2, foods: tight })
-    expect(names(r), dump('もも150g上限', r)).toContain('ホエイプロテイン')
+    // 主菜がそぼろだけ、しかも1食100gまでしか食べられない設定
+    const r = solve({
+      target: TARGET,
+      eaten: MEAL1,
+      mealCount: 2,
+      foods: soboOnly({ sobo: { maxAmount: 100 } }),
+    })
+    expect(names(r), dump('そぼろ100g上限', r)).toContain('プロテイン')
     expectHardConstraints(r)
   })
 
   it('プロテインは3杯までしか足さない', () => {
-    const tight = foods({ momo: { maxAmount: 100 } }).map((f) =>
-      f.category === 'protein' && !['momo', 'egg', 'whey'].includes(f.id)
-        ? { ...f, inStock: false }
-        : f
-    )
-    const r = solve({ target: TARGET, eaten: MEAL1, mealCount: 2, foods: tight })
+    const r = solve({
+      target: TARGET,
+      eaten: MEAL1,
+      mealCount: 2,
+      foods: soboOnly({ sobo: { maxAmount: 50 } }),
+    })
     const scoops = r.meals
       .flatMap((m) => m.items)
       .filter((i) => i.food.id === 'whey')
       .reduce((n, i) => n + i.amount, 0)
-    expect(scoops, dump('もも100g上限', r)).toBeLessThanOrEqual(3)
+    expect(scoops, dump('そぼろ50g上限', r)).toBeLessThanOrEqual(3)
   })
 
   it('★1食80gの制約と両立できない日は、上限を守って不足を正直に報告する', () => {
     // 1日を2食で組むと 170g ÷ 2 = 85g/食 になり、80g の上限と両立しない。
     // このとき無理に押し込まず、shortfall として返すのが正しい。
-    const only = foods().map((f) =>
-      f.category === 'protein' && !['momo', 'egg', 'whey'].includes(f.id)
-        ? { ...f, inStock: false }
-        : f
-    )
-    const r = solve({ target: TARGET, eaten: {}, mealCount: 2, foods: only })
+    const r = solve({
+      target: TARGET,
+      eaten: {},
+      mealCount: 2,
+      foods: soboOnly({ sobo: { maxAmount: 100 } }),
+    })
     for (const m of r.meals) expect(m.totals.proteinG).toBeLessThanOrEqual(MAX_PROTEIN_PER_MEAL_G)
     expect(r.shortfall.proteinG, dump('2食で170g', r)).toBeGreaterThan(0)
     expect(r.notes.join('')).toContain('明日')

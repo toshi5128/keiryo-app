@@ -7,6 +7,7 @@
  */
 
 import type { NutritionPlan } from './types'
+import { addLogDays, weekStart } from './dateBoundary'
 
 // ===========================================================================
 // 係数（仕様書 §1）
@@ -20,6 +21,17 @@ export const PROTEIN_PER_LBM = 2.4
 export const FAT_PER_BODYWEIGHT = 0.72
 /** ★脂質の下限係数: 体重 1kg あたり (g)。ソルバーはここを絶対に割らない */
 export const FAT_FLOOR_PER_BODYWEIGHT = 0.7
+/** ★塩分の上限 (g/日)。v4 §3。超えた翌朝は +0.5〜1.0kg 出るので予告に使う */
+export const SALT_LIMIT_G = 6
+/** 水分: 体重 1kg あたり (ml)。v4 §3「体重×35ml + 発汗分」 */
+export const WATER_PER_KG_ML = 35
+/** 毎日トレーニングするぶんの発汗上乗せ (ml) */
+export const WATER_SWEAT_ML = 200
+/** 水分目標の丸め単位 (ml)。0.5L 刻みにして「3.0L 飲む」と言い切れる形にする */
+export const WATER_ROUND_ML = 500
+/** 水分目標の下限 (ml)。体重が落ちても 2.5L は割らない */
+export const WATER_FLOOR_ML = 2500
+
 /** 炭水化物の下限 (g) */
 export const CARB_FLOOR_G = 100
 /** 標準の1日あたり赤字 (kcal)。50kcal 丸めの結果 2,735 - 550 → 2,200 に着地する */
@@ -49,6 +61,16 @@ export function roundKcal(kcal: number, step = 50): number {
 /** マクロは 5g 単位（168.5 → 170） */
 export function roundMacro(g: number, step = 5): number {
   return Math.round(g / step) * step
+}
+
+/**
+ * ★1日の水分目標 (ml)。体重×35ml ＋ 発汗分を 0.5L 単位に丸める。
+ * 83.3kg → 3,100 → 3,000ml。80.6kg → 3,021 → 3,000ml。
+ * 「3.0L」と言い切れるよう、体重が 1〜2kg 動いても目標がブレない刻みにしている。
+ */
+export function waterTargetMl(weightKg: number): number {
+  const raw = weightKg * WATER_PER_KG_ML + WATER_SWEAT_ML
+  return Math.max(WATER_FLOOR_ML, Math.round(raw / WATER_ROUND_ML) * WATER_ROUND_ML)
 }
 
 // ===========================================================================
@@ -140,6 +162,8 @@ export function buildPlan(input: PlanInput): NutritionPlan {
     fatG: m.fatG,
     carbG: m.carbG,
     fatFloorG: Math.round(input.body.weightKg * FAT_FLOOR_PER_BODYWEIGHT),
+    saltLimitG: SALT_LIMIT_G,
+    waterTargetMl: waterTargetMl(input.body.weightKg),
     ratio: m.ratio,
   }
 }
@@ -339,4 +363,75 @@ export function movingAverage(
   })
   if (inWindow.length === 0) return null
   return inWindow.reduce((s, w) => s + w.weightKg, 0) / inWindow.length
+}
+
+// ===========================================================================
+// ★固定週での比較（v4 §7）
+// ===========================================================================
+
+/**
+ * ★週の区切りは固定（例: 8/31〜9/6, 9/7〜9/13）。移動窓で比較しない。
+ *
+ * 移動窓（今日から7日 vs その前7日）だと、判定が毎日わずかに動く。
+ * 「今日は順調、明日は停滞」が交互に出ると何を信じてよいか分からなくなり、
+ * 本人が自己判断でカロリーを触りはじめる。固定週なら答えは週に1回しか変わらない。
+ *
+ * グラフに引く7日移動平均線（movingAverage）は今までどおり移動窓でよい。
+ * 動かしてはいけないのは「判定」のほう。
+ */
+export interface FixedWeekAverage {
+  weekStart: string
+  weekEnd: string
+  avgKg: number | null
+  /** 実際に測れた日数。少ない週は判定に使わない */
+  days: number
+}
+
+/** 判定に使ってよい最低日数。これ未満の週は「集計中」として判定を出さない */
+export const MIN_DAYS_FOR_JUDGMENT = 4
+
+/** weekStartDate から7日間（固定週）の平均。参考値フラグの立った測定は除外する */
+export function fixedWeekAverage(weighIns: WeighIn[], weekStartDate: string): FixedWeekAverage {
+  const weekEnd = addLogDays(weekStartDate, 6)
+  const inWeek = weighIns.filter(
+    (w) => !w.isReference && w.logDate >= weekStartDate && w.logDate <= weekEnd
+  )
+  return {
+    weekStart: weekStartDate,
+    weekEnd,
+    avgKg: inWeek.length ? inWeek.reduce((n, w) => n + w.weightKg, 0) / inWeek.length : null,
+    days: inWeek.length,
+  }
+}
+
+export interface FixedWeekComparison {
+  thisWeek: FixedWeekAverage
+  lastWeek: FixedWeekAverage
+  /** 両週とも十分な日数がそろっていて、判定を出してよいか */
+  ready: boolean
+  /** まだ判定できない理由（画面にそのまま出せる） */
+  reason?: string
+}
+
+/**
+ * ★今日が属する固定週と、その前の週を比べる材料をつくる。
+ * 週の始まりは dateBoundary.weekStart（月曜始まり）に合わせる。
+ */
+export function compareFixedWeeks(weighIns: WeighIn[], logDate: string): FixedWeekComparison {
+  const thisStart = weekStart(logDate)
+  const lastStart = addLogDays(thisStart, -7)
+  const thisWeek = fixedWeekAverage(weighIns, thisStart)
+  const lastWeek = fixedWeekAverage(weighIns, lastStart)
+  if (lastWeek.avgKg == null || lastWeek.days < MIN_DAYS_FOR_JUDGMENT) {
+    return { thisWeek, lastWeek, ready: false, reason: '前の週の記録がまだ足りません' }
+  }
+  if (thisWeek.avgKg == null || thisWeek.days < MIN_DAYS_FOR_JUDGMENT) {
+    return {
+      thisWeek,
+      lastWeek,
+      ready: false,
+      reason: `今週は集計中です（${thisWeek.days}/7日）。${MIN_DAYS_FOR_JUDGMENT}日そろってから判定します`,
+    }
+  }
+  return { thisWeek, lastWeek, ready: true }
 }

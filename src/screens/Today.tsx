@@ -12,9 +12,35 @@ import { macrosOf } from '../core/solver'
 import { planWeek, weekProgress } from '../core/weekBudget'
 import { buildSchedule, remainingMeals } from '../core/weightJudge'
 import { weekDates } from '../core/dateBoundary'
-import { mealFromFood, mealsOf, sumMeals, useStore } from '../store'
+import {
+  firstMealProteinG,
+  mainFoodIdOf,
+  makeWaterLog,
+  mealFromFood,
+  mealsOf,
+  recentDates,
+  standardMealLogs,
+  standardShakeLog,
+  sumMeals,
+  useStore,
+  waterOf,
+} from '../store'
 import type { MealLog } from '../store'
 import { uid } from '../store'
+import {
+  STANDARD_MEALS_PER_DAY,
+  STANDARD_SHAKES_PER_DAY,
+  standardMealItems,
+  standardMealMacros,
+} from '../core/standardMenu'
+import {
+  WATER_QUICK_ML,
+  checkFirstMeal,
+  checkMonotony,
+  checkSalt,
+  checkWater,
+} from '../core/dailyChecks'
+import type { Check } from '../core/dailyChecks'
 
 const hhmm = (d: Date) =>
   `${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`
@@ -32,6 +58,17 @@ export function Today() {
   const day = state.days[today] ?? {}
   const wakeAt = day.wakeAt ? new Date(day.wakeAt) : null
   const now = new Date()
+  const water = waterOf(state, today)
+
+  /** ★食材ごとのすでに食べた量。卵3個・サバ缶1缶の上限判定に渡す */
+  const eatenAmounts = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const m of todayMeals) {
+      if (!m.foodId) continue
+      out[m.foodId] = (out[m.foodId] ?? 0) + m.amount
+    }
+    return out
+  }, [todayMeals])
 
   // 記録済みの「食事」の回数（甘いもの単品や外食は食事回数に数えない）
   const eatenMealCount = new Set(
@@ -92,11 +129,12 @@ export function Today() {
           fatFloorG: plan.fatFloorG,
         },
         eaten,
+        eatenAmounts,
         mealCount,
         foods: state.foods,
         wants,
       }),
-    [plan, eaten, mealCount, state.foods, wants]
+    [plan, eaten, eatenAmounts, mealCount, state.foods, wants]
   )
 
   const suggestedFoods = result.meals.flatMap((m) => m.items.map((i) => i.food))
@@ -104,6 +142,42 @@ export function Today() {
     (f, i) => suggestedFoods.findIndex((x) => x.id === f.id) === i
   )
   const sweets = state.foods.filter((f) => f.category === 'sweet' && !f.isExcluded && f.inStock !== false)
+
+  // -------------------------------------------------------------------
+  // ★その日のうちに気づかないと手遅れになるもの（v4 §1 / §3 / §10 / §12）
+  // -------------------------------------------------------------------
+  /** 1日のどこまで進んだか。水分を急かすかどうかの判断に使う */
+  const dayProgress = (() => {
+    const dayStart = new Date(dayEnd.getTime())
+    dayStart.setDate(dayStart.getDate() - 1)
+    const span = dayEnd.getTime() - dayStart.getTime()
+    return span > 0 ? (now.getTime() - dayStart.getTime()) / span : 1
+  })()
+
+  const checks: Check[] = useMemo(() => {
+    const out: (Check | null)[] = [
+      checkFirstMeal(firstMealProteinG(todayMeals)),
+      checkSalt(eaten.saltG, plan.saltLimitG),
+      // 起床前は何も始まっていないので催促しない（ソルバーの補足と同じ方針）
+      wakeAt ? checkWater(water, plan.waterTargetMl, dayProgress) : null,
+    ]
+    // 主菜が何日続いたか（今日を含めて新しい順）
+    const mains = recentDates(today, 10).map((d) => mainFoodIdOf(mealsOf(state, d)))
+    const mono = checkMonotony(mains, state.foods)
+    if (mono) out.push(mono.check)
+    return out.filter((c): c is Check => c !== null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayMeals, eaten.saltG, water, plan.saltLimitG, plan.waterTargetMl, state, today, wakeAt])
+
+  /** 赤（alert）だけは上に出す。ok は1食目を確保できたときの安心材料なので下に回す */
+  const alerts = checks.filter((c) => c.level === 'alert')
+  const others = checks.filter((c) => c.level !== 'alert')
+
+  // 標準メニューの残り回数（v4 §4）
+  const standardMeal = standardMealMacros(state.foods)
+  const shakesToday = todayMeals
+    .filter((m) => m.foodId === 'whey')
+    .reduce((n, m) => n + m.amount, 0)
 
   // -------------------------------------------------------------------
   function wake() {
@@ -168,6 +242,43 @@ export function Today() {
     })
   }
 
+  /** ★標準メニュー1食をワンタップで記録する（最頻出の操作。v4 §12） */
+  function recordStandard() {
+    const logs = standardMealLogs(state)
+    update((s) => ({ ...s, meals: [...s.meals, ...logs] }))
+    const m = standardMealMacros(state.foods)
+    setNote({
+      title: `標準メニュー1食を記録しました（P${Math.round(m.proteinG)} / ${Math.round(m.kcal)}kcal）`,
+      body: 'そぼろ120g・卵1個・ご飯170g・オイル6g。そぼろは調理後の重量です。',
+      calm: true,
+    })
+  }
+
+  /** プロテイン1杯（1食目とジム後の2杯） */
+  function recordShake() {
+    const log = standardShakeLog(state)
+    update((s) => ({ ...s, meals: [...s.meals, log] }))
+    setNote({
+      title: `プロテイン1杯を記録しました（P21 / 120kcal）`,
+      body: `今日 ${shakesToday + 1}杯目（1食目とジム後の2杯が標準）。`,
+      calm: true,
+    })
+  }
+
+  /** 水分をワンタップで足す。★水・お茶・コーヒー・プロテイン・汁物の汁を数える */
+  function addWater(ml: number) {
+    update((s) => ({ ...s, water: [...s.water, makeWaterLog(ml, s.profile.boundaryHour)] }))
+  }
+
+  function undoWater() {
+    update((s) => {
+      const mine = s.water.filter((w) => w.logDate === today)
+      if (mine.length === 0) return s
+      const last = mine[mine.length - 1]
+      return { ...s, water: s.water.filter((w) => w.id !== last.id) }
+    })
+  }
+
   function recordMeal(index: number) {
     const meal = result.meals[index]
     if (!meal) return
@@ -198,9 +309,20 @@ export function Today() {
         eaten={eaten}
         target={{ proteinG: plan.proteinG, fatG: plan.fatG, carbG: plan.carbG }}
         kcal={plan.kcal}
+        saltLimitG={plan.saltLimitG}
+        waterMl={water}
+        waterTargetMl={plan.waterTargetMl}
         weekLine={`週 ${Math.round(week.progress.consumedKcal).toLocaleString()} / ${week.plan.weeklyBudgetKcal.toLocaleString()}`}
         weekOk={week.progress.status !== 'over'}
       />
+
+      {/* ★赤い警告は秤の直下。1食目のPが薄い／塩分超過は、あとから直せない */}
+      {alerts.map((c, i) => (
+        <div className="log alert" key={i}>
+          <b>{c.title}</b>
+          {c.body}
+        </div>
+      ))}
 
       {!wakeAt && (
         <button className="primary" onClick={wake}>
@@ -252,6 +374,65 @@ export function Today() {
         </div>
       )}
 
+      {/* ★標準メニュー（v4 §4）。最頻出の操作なので提案より上に置く */}
+      <div className="card">
+        <div className="card-h">
+          <div className="t">
+            標準メニュー<span>毎食これ</span>
+          </div>
+          <div className="s">
+            P{Math.round(standardMeal.proteinG)} ／ {Math.round(standardMeal.kcal)} kcal
+          </div>
+        </div>
+        {standardMealItems(state.foods).map((it) => (
+          <div className="item" key={it.food.id}>
+            <span>{it.food.name.replace(/（.*?）/, '')}</span>
+            <span className="amt">
+              {it.amount}
+              {it.unit}
+            </span>
+          </div>
+        ))}
+        <div className="row" style={{ marginTop: 12 }}>
+          <button className="primary" style={{ marginBottom: 0 }} onClick={recordStandard}>
+            1食 記録（{eatenMealCount}/{STANDARD_MEALS_PER_DAY}）
+          </button>
+          <button className="ghost" onClick={recordShake}>
+            プロテイン（{shakesToday}/{STANDARD_SHAKES_PER_DAY}杯）
+          </button>
+        </div>
+        <p className="hint" style={{ marginTop: 10 }}>
+          そぼろは★調理後の重量です。生で量ると P を22%少なく数えます。
+        </p>
+      </div>
+
+      {/* ★水分（v4 §3）。控えると逆に溜まるので、飲んだら押すだけにする */}
+      <div className="card">
+        <div className="card-h">
+          <div className="t">
+            水分<span>飲んだら押す</span>
+          </div>
+          <div className="s">
+            {(water / 1000).toFixed(1)} / {(plan.waterTargetMl / 1000).toFixed(1)} L
+          </div>
+        </div>
+        <div className="acts" style={{ marginTop: 4 }}>
+          {WATER_QUICK_ML.map((ml) => (
+            <button key={ml} onClick={() => addWater(ml)}>
+              <i>ADD</i>
+              {ml >= 1000 ? `+${ml / 1000}L` : `+${ml}ml`}
+            </button>
+          ))}
+          <button onClick={undoWater} disabled={water === 0}>
+            <i>UNDO</i>
+            1つ戻す
+          </button>
+        </div>
+        <p className="hint" style={{ marginTop: 10 }}>
+          数えるのは 水・お茶・コーヒー・プロテイン・汁物の汁。食品に含まれる水分は数えません。
+        </p>
+      </div>
+
       {result.meals.map((m, i) => (
         <div className="card" key={m.index}>
           <div className="card-h">
@@ -290,6 +471,13 @@ export function Today() {
           ))}
         </div>
       )}
+
+      {others.map((c, i) => (
+        <div className={`log${c.level === 'ok' ? ' calm' : ''}`} key={i}>
+          <b>{c.title}</b>
+          {c.body}
+        </div>
+      ))}
 
       {mealCount === 0 && wakeAt && (
         <div className="empty">

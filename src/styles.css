@@ -158,6 +158,19 @@ h2 {
 .beam.c .fill {
   background: var(--carb);
 }
+/* 上限系（塩分）・積み上げ系（水分）。PFC より細く、従属していることを見せる */
+.beam.salt .fill {
+  background: var(--dim);
+}
+.beam.water .fill {
+  background: #5d8ea8;
+}
+.beam.thin .rail {
+  height: 6px;
+}
+.beam.thin {
+  margin-bottom: 10px;
+}
 .fill.over {
   background: var(--shu) !important;
 }
@@ -407,6 +420,14 @@ h2 {
 }
 .log.calm b {
   color: var(--moss);
+}
+/* ★手遅れになる警告（1食目のPが薄い・塩分超過）。赤で出す */
+.log.alert {
+  background: rgba(217, 84, 63, 0.12);
+  border-left-color: var(--shu);
+}
+.log.alert b {
+  color: var(--shu);
 }
 
 /* ---------- 食材 ---------- */
@@ -670,4 +691,27 @@ select {
   height: 1px;
   background: var(--hair);
   margin: 14px 0;
+}
+
+/* ★参照専用の行（そぼろの「生」）。食材と間違えて記録させないため見た目で分ける */
+.food.ref {
+  opacity: 0.72;
+}
+.food.ref .nm {
+  cursor: default;
+}
+.refonly {
+  font-size: 10px;
+  color: var(--dim);
+  font-family: var(--num);
+  letter-spacing: 0.04em;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+/* 食材の注意書き（「調理後の重量で入れること」など） */
+.food .nm i.note {
+  color: var(--kinako);
+  margin-top: 2px;
 }

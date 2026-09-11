@@ -12,7 +12,13 @@ import { buildPlan } from './core/calc'
 import type { NutritionPlan } from './core/types'
 import type { Food } from './core/types'
 import { formatLogDate, toLogDate } from './core/dateBoundary'
-import { SEED_FOODS } from './data/seedFoods'
+import { SEED_FOODS, SEED_VERSION } from './data/seedFoods'
+import { SEED_WEIGHTS } from './data/seedWeights'
+import {
+  STANDARD_SHAKE_FOOD_ID,
+  standardMealItems,
+  standardShakeItem,
+} from './core/standardMenu'
 
 const KEY = 'keiryo.v1'
 
@@ -44,6 +50,8 @@ export interface MealLog {
   eatenAt: string
   logDate: string
   kind: 'meal' | 'eat_out' | 'sweet'
+  /** 同じ1食としてまとめる鍵。1食目の P を測るのにこれを使う */
+  groupId?: string
 }
 
 export interface WeighIn {
@@ -67,13 +75,24 @@ export interface DayInfo {
   trained?: boolean
 }
 
+/** 水分。★水・お茶・コーヒー・プロテイン・汁物の汁を数える（v4 §3） */
+export interface WaterLog {
+  id: string
+  logDate: string
+  amountMl: number
+  loggedAt: string
+}
+
 export interface AppState {
   profile: Profile
   foods: Food[]
   meals: MealLog[]
   weights: WeighIn[]
   bench: BenchLog[]
+  water: WaterLog[]
   days: Record<string, DayInfo>
+  /** 食材シードの版。上がっていたら食材だけ塗り直す */
+  seedVersion?: number
 }
 
 /** 仕様書 §1 の実測値を初期値にする */
@@ -96,10 +115,34 @@ function initialState(): AppState {
     profile: { ...DEFAULT_PROFILE },
     foods: SEED_FOODS.map((f) => ({ ...f })),
     meals: [],
-    weights: [],
+    // ★v4 §18 の実績値。初回から7日平均が出るように入れておく
+    weights: SEED_WEIGHTS.map((w) => ({ ...w })),
     bench: [],
+    water: [],
     days: {},
+    seedVersion: SEED_VERSION,
   }
+}
+
+/**
+ * ★食材シードの版上げ。
+ * v4 で そぼろの P が 22 → 28（調理後）に変わり、鶏ももが除外になった。
+ * ローカル保存を素通しすると古い数値を使い続けてしまうので、シードの行は
+ * 新しい値で上書きし、在庫スイッチと自分で足した食材だけ引き継ぐ。
+ */
+export function migrateFoods(saved: Food[] | undefined, savedVersion: number | undefined): Food[] {
+  const seeds = SEED_FOODS.map((f) => ({ ...f }))
+  if (!saved?.length) return seeds
+  if (savedVersion === SEED_VERSION) return saved
+  const seedIds = new Set(seeds.map((f) => f.id))
+  const merged = seeds.map((seed) => {
+    const old = saved.find((f) => f.id === seed.id)
+    // 在庫は本人が切った状態なので引き継ぐ。栄養価と除外フラグはシードを正とする
+    return old && old.inStock === false ? { ...seed, inStock: false } : seed
+  })
+  // 自分で足した食材は残す
+  const userAdded = saved.filter((f) => !seedIds.has(f.id))
+  return [...merged, ...userAdded]
 }
 
 function load(): AppState {
@@ -110,11 +153,13 @@ function load(): AppState {
     const base = initialState()
     return {
       profile: { ...base.profile, ...(parsed.profile ?? {}) },
-      foods: parsed.foods?.length ? parsed.foods : base.foods,
+      foods: migrateFoods(parsed.foods, parsed.seedVersion),
       meals: parsed.meals ?? [],
-      weights: parsed.weights ?? [],
+      weights: parsed.weights?.length ? parsed.weights : base.weights,
       bench: parsed.bench ?? [],
+      water: parsed.water ?? [],
       days: parsed.days ?? {},
+      seedVersion: SEED_VERSION,
     }
   } catch {
     return initialState()
@@ -243,4 +288,91 @@ export function recentDates(endLogDate: string, n: number): string[] {
     d.setDate(d.getDate() - 1)
   }
   return out
+}
+
+// ===========================================================================
+// 水分（v4 §3）
+// ===========================================================================
+
+/** その日に飲んだ量(ml) */
+export function waterOf(state: AppState, logDate: string): number {
+  return state.water.filter((w) => w.logDate === logDate).reduce((n, w) => n + w.amountMl, 0)
+}
+
+export function makeWaterLog(amountMl: number, boundaryHour: number, at = new Date()): WaterLog {
+  return {
+    id: uid(),
+    logDate: toLogDate(at, boundaryHour),
+    amountMl,
+    loggedAt: at.toISOString(),
+  }
+}
+
+// ===========================================================================
+// 1食のまとまり（★1食目のタンパク質を測るのに使う。v4 §12）
+// ===========================================================================
+
+/**
+ * その日の記録を「1食ごと」に束ねる。
+ * groupId があればそれで束ね、無い古い記録は「同じ時（hour）」で束ねる。
+ * 戻り値は食べた順。甘いもの単品は食事として数えない。
+ */
+export function mealGroups(meals: MealLog[]): MealLog[][] {
+  const buckets = new Map<string, MealLog[]>()
+  for (const m of meals) {
+    if (m.kind === 'sweet') continue
+    const key = m.groupId ?? m.eatenAt.slice(0, 13)
+    const list = buckets.get(key)
+    if (list) list.push(m)
+    else buckets.set(key, [m])
+  }
+  return [...buckets.values()].sort((a, b) => a[0].eatenAt.localeCompare(b[0].eatenAt))
+}
+
+/** ★1食目のタンパク質(g)。まだ何も食べていなければ null */
+export function firstMealProteinG(meals: MealLog[]): number | null {
+  const groups = mealGroups(meals)
+  if (groups.length === 0) return null
+  return round1(groups[0].reduce((n, m) => n + m.proteinG, 0))
+}
+
+/** その日の主菜（いちばん P を稼いだ食材）の id。飽きの検知に使う */
+export function mainFoodIdOf(meals: MealLog[]): string | null {
+  const byFood = new Map<string, number>()
+  for (const m of meals) {
+    if (!m.foodId || m.kind === 'sweet') continue
+    if (m.foodId === STANDARD_SHAKE_FOOD_ID) continue
+    byFood.set(m.foodId, (byFood.get(m.foodId) ?? 0) + m.proteinG)
+  }
+  let best: string | null = null
+  let bestP = 0
+  for (const [id, p] of byFood) {
+    if (p > bestP) {
+      best = id
+      bestP = p
+    }
+  }
+  return best
+}
+
+// ===========================================================================
+// 標準メニューのワンタップ記録（v4 §4 / §12。最頻出の操作）
+// ===========================================================================
+
+/** 標準メニュー1食ぶんの記録を作る。1回のタップで4行まとめて入る */
+export function standardMealLogs(state: AppState, at = new Date()): MealLog[] {
+  const group = uid()
+  return standardMealItems(state.foods).map((it) => ({
+    ...mealFromFood(it.food, it.amount, state.profile.boundaryHour, 'meal', at),
+    groupId: group,
+  }))
+}
+
+/** プロテイン1杯ぶんの記録 */
+export function standardShakeLog(state: AppState, at = new Date()): MealLog {
+  const it = standardShakeItem(state.foods)
+  return {
+    ...mealFromFood(it.food, it.amount, state.profile.boundaryHour, 'meal', at),
+    groupId: uid(),
+  }
 }

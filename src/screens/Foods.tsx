@@ -15,6 +15,7 @@ const GROUPS: { key: FoodCategory; label: string }[] = [
   { key: 'veg', label: '野菜・海藻' },
   { key: 'fat', label: '脂質' },
   { key: 'sweet', label: '甘いもの' },
+  { key: 'eating_out', label: '外食' },
   { key: 'other', label: 'その他' },
 ]
 
@@ -203,7 +204,7 @@ export function Foods() {
             <div className="tagline">{g.label}</div>
             {list.map((f) => (
               <div
-                className={`food${f.isExcluded ? ' off' : ''}${f.inStock === false ? ' nostock' : ''}`}
+                className={`food${f.isExcluded ? ' off' : ''}${f.inStock === false ? ' nostock' : ''}${f.isReference ? ' ref' : ''}`}
                 key={f.id}
               >
                 <div className="nm" onClick={() => setEdit({ ...f })} style={{ cursor: 'pointer' }}>
@@ -211,29 +212,41 @@ export function Foods() {
                   <i>
                     {f.baseAmount}
                     {f.baseUnit} ・ {f.kcal}kcal ・ P{f.proteinG} F{f.fatG} C{f.carbG}
+                    {f.saltG ? ` 塩${f.saltG}` : ''}
                     {f.maxAmount ? ` ・ 上限${f.maxAmount}${f.baseUnit}` : ''}
+                    {f.dailyMaxAmount ? `／1日${f.dailyMaxAmount}${f.baseUnit}` : ''}
                   </i>
+                  {/* ★注意書き（「調理後の重量で入れること」など）は必ず見えるところに出す */}
+                  {f.note && <i className="note">{f.note}</i>}
                 </div>
-                <div>
-                  <button
-                    className={`sw${f.isExcluded ? '' : ' on'}`}
-                    role="switch"
-                    aria-checked={!f.isExcluded}
-                    aria-label={`${f.name} を食べる`}
-                    onClick={() => toggle(f.id, 'isExcluded')}
-                  />
-                  <div className="swlbl">食べる</div>
-                </div>
-                <div>
-                  <button
-                    className={`sw stock${f.inStock === false ? '' : ' on'}`}
-                    role="switch"
-                    aria-checked={f.inStock !== false}
-                    aria-label={`${f.name} の在庫`}
-                    onClick={() => toggle(f.id, 'inStock')}
-                  />
-                  <div className="swlbl">在庫</div>
-                </div>
+                {/* ★参照専用（そぼろの「生」）はスイッチを出さない。
+                    普通の食材に見えると、これで記録して P を22%少なく数えてしまう */}
+                {f.isReference ? (
+                  <div className="refonly">参照のみ</div>
+                ) : (
+                  <>
+                    <div>
+                      <button
+                        className={`sw${f.isExcluded ? '' : ' on'}`}
+                        role="switch"
+                        aria-checked={!f.isExcluded}
+                        aria-label={`${f.name} を食べる`}
+                        onClick={() => toggle(f.id, 'isExcluded')}
+                      />
+                      <div className="swlbl">食べる</div>
+                    </div>
+                    <div>
+                      <button
+                        className={`sw stock${f.inStock === false ? '' : ' on'}`}
+                        role="switch"
+                        aria-checked={f.inStock !== false}
+                        aria-label={`${f.name} の在庫`}
+                        onClick={() => toggle(f.id, 'inStock')}
+                      />
+                      <div className="swlbl">在庫</div>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>

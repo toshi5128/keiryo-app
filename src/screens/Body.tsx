@@ -8,8 +8,7 @@
 
 import { useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { goalFromTargetBodyFat, movingAverage, reviewWeek } from '../core/calc'
-import { addLogDays } from '../core/dateBoundary'
+import { compareFixedWeeks, goalFromTargetBodyFat, movingAverage, reviewWeek } from '../core/calc'
 import { explainWeightChange, judgeBench } from '../core/weightJudge'
 import { mealsOf, recentDates, sumMeals, useStore } from '../store'
 
@@ -45,9 +44,13 @@ export function Body() {
     return [Math.floor((Math.min(...vals) - 0.5) * 2) / 2, Math.ceil((Math.max(...vals) + 0.5) * 2) / 2]
   }, [chart])
 
-  const thisAvg = movingAverage(weights, today, 7)
-  const lastAvg = movingAverage(weights, addLogDays(today, -7), 7)
-  const review = thisAvg != null && lastAvg != null ? reviewWeek({ thisWeekAvgKg: thisAvg, lastWeekAvgKg: lastAvg }) : null
+  // ★判定は固定週どうしの比較で出す（v4 §7）。移動窓だと毎日答えが動いてしまう。
+  //   グラフに引く7日移動平均線（movingAverage）は今までどおり移動窓のまま。
+  const weeks = useMemo(() => compareFixedWeeks(weights, today), [weights, today])
+  const review =
+    weeks.ready && weeks.thisWeek.avgKg != null && weeks.lastWeek.avgKg != null
+      ? reviewWeek({ thisWeekAvgKg: weeks.thisWeek.avgKg, lastWeekAvgKg: weeks.lastWeek.avgKg })
+      : null
 
   // ---- 水分変動の自動説明 ----
   const explain = useMemo(() => {
@@ -201,18 +204,54 @@ export function Body() {
         </div>
       )}
 
-      {review && (
-        <div className="card">
-          <div className="card-h">
-            <div className="t">今週の判定</div>
-            <div className="s">
-              {review.deltaKg > 0 ? '+' : ''}
-              {review.deltaKg.toFixed(2)}kg / 週
-            </div>
+      <div className="card">
+        <div className="card-h">
+          <div className="t">
+            今週の判定
+            <span>
+              {weeks.thisWeek.weekStart.slice(5).replace('-', '/')}〜
+              {weeks.thisWeek.weekEnd.slice(5).replace('-', '/')}
+            </span>
           </div>
-          <div className="explain">{review.message}</div>
+          <div className="s">
+            {review
+              ? `${review.deltaKg > 0 ? '+' : ''}${review.deltaKg.toFixed(2)}kg / 週`
+              : `${weeks.thisWeek.days}/7日`}
+          </div>
         </div>
-      )}
+        {review ? (
+          <>
+            <div className="item">
+              <span>
+                今週の平均
+                <span className="sub2">
+                  {weeks.thisWeek.days}日ぶん
+                </span>
+              </span>
+              <span className="amt">{weeks.thisWeek.avgKg!.toFixed(2)}kg</span>
+            </div>
+            <div className="item">
+              <span>
+                前週の平均
+                <span className="sub2">
+                  {weeks.lastWeek.weekStart.slice(5).replace('-', '/')}〜
+                  {weeks.lastWeek.weekEnd.slice(5).replace('-', '/')}・{weeks.lastWeek.days}日ぶん
+                </span>
+              </span>
+              <span className="amt">{weeks.lastWeek.avgKg!.toFixed(2)}kg</span>
+            </div>
+            <div className="explain" style={{ marginTop: 12 }}>
+              {review.message}
+            </div>
+          </>
+        ) : (
+          <div className="explain">
+            {weeks.reason}
+            <br />
+            ★週の区切りは固定です。毎日ちがう答えが出ないように、日をまたいで平均を取り直しません。
+          </div>
+        )}
+      </div>
 
       <div className="card">
         <div className="card-h">

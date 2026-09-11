@@ -67,9 +67,23 @@ function roundToStep(value: number, step: number): number {
   return Math.round(value / step) * step
 }
 
-/** ★除外食材と在庫切れはここで落とす。ソルバーはこの関数を通したものしか触らない。 */
+/**
+ * ★除外食材と在庫切れはここで落とす。ソルバーはこの関数を通したものしか触らない。
+ *
+ * v4 で2つ増えた：
+ *   ・is_reference（そぼろの「生」の行）— 買い物計算専用。献立に出したら二重計上になる
+ *   ・eating_out（外食メニュー）— 本人が選んだときだけ入れるもので、自動提案はしない
+ */
 export function usableFoods(foods: Food[]): Food[] {
-  return foods.filter((f) => !f.isExcluded && f.inStock !== false)
+  return foods.filter(
+    (f) => !f.isExcluded && !f.isReference && f.inStock !== false && f.category !== 'eating_out'
+  )
+}
+
+/** ★1日の上限までの残り（卵3個・サバ缶1缶）。上限が無ければ Infinity */
+export function dailyRoom(food: Food, alreadyEaten: number): number {
+  if (food.dailyMaxAmount == null) return Infinity
+  return Math.max(0, food.dailyMaxAmount - alreadyEaten)
 }
 
 const byId = (foods: Food[], id: string): Food | undefined => foods.find((f) => f.id === id)
@@ -96,6 +110,8 @@ export interface SolveInput {
   target: SolveTarget
   /** すでに食べた分（外食ぶんもここに入れる） */
   eaten?: Partial<Macros>
+  /** ★食材ごとのすでに食べた量。1日の上限（卵3個・サバ缶1缶）の判定に使う */
+  eatenAmounts?: Record<string, number>
   /** 残りの食事回数。起床が遅れた日は 1 になる */
   mealCount: number
   /** 食材マスタ全件。除外・在庫の判定はソルバー内で行う */
@@ -157,8 +173,14 @@ export function solve(input: SolveInput): SolveResult {
   const fixedPerMeal: PlanItem[][] = Array.from({ length: mealCount }, () => [])
   const egg = byId(pool, 'egg')
   const natto = byId(pool, 'natto')
+  const eatenAmounts = input.eatenAmounts ?? {}
+  // ★卵は1日3個まで。すでに食べたぶんを引いて、残る個数しか置かない
+  let eggRoom = egg ? dailyRoom(egg, eatenAmounts[egg.id] ?? 0) : 0
   for (let i = 0; i < mealCount; i++) {
-    if (egg) fixedPerMeal[i].push({ food: egg, amount: 1, unit: egg.baseUnit })
+    if (egg && eggRoom >= 1) {
+      fixedPerMeal[i].push({ food: egg, amount: 1, unit: egg.baseUnit })
+      eggRoom -= 1
+    }
     // 野菜は食ごとに顔ぶれをずらす（毎食ブロッコリー150g だと続かない）
     fixedPerMeal[i].push(...pickVegetables(pool, VEG_PER_MEAL_G, i))
   }
@@ -220,6 +242,9 @@ export function solve(input: SolveInput): SolveResult {
       const needFromMain = aimP - (tally(meals.flat()).proteinG + riceGuessP)
       mainEach = Math.max(0, roundToStep(needFromMain / perUnit / mealCount, step))
       if (main.maxAmount != null) mainEach = Math.min(mainEach, main.maxAmount)
+      // ★1日の上限（サバ缶1缶など）を食数で割った分までしか置かない
+      const room = dailyRoom(main, eatenAmounts[main.id] ?? 0)
+      if (room !== Infinity) mainEach = Math.min(mainEach, Math.floor(room / mealCount) || 0)
       for (let i = 0; i < mealCount; i++) {
         if (mainEach > 0) meals[i].unshift({ food: main, amount: mainEach, unit: main.baseUnit })
       }
@@ -280,21 +305,24 @@ export function solve(input: SolveInput): SolveResult {
     // --- 5. ★脂質が下限を割る間、脂質源を足し続ける（モックは1杯で打ち切っていた） ---
     const fatSource = pool.find((f) => f.category === 'fat')
     if (fatSource) {
-      const perUnitFat = macrosOf(fatSource, fatSource.baseAmount).fatG
+      // ★v4 でオイルが「小さじ1杯」から「1g」単位になったので、刻み幅(2g)ずつ足す。
+      //   base_amount(=1g) ずつ足すと回数の上限に当たって下限まで届かない。
+      const fatStep = fatSource.stepAmount ?? fatSource.baseAmount
+      const perUnitFat = macrosOf(fatSource, fatStep).fatG
       let guard = 0
-      while (guard < 24) {
+      while (guard < 60) {
         const dayFat = eaten.fatG + tally(meals.flat()).fatG
         if (dayFat >= input.target.fatFloorG - 0.5) break
         if (perUnitFat <= 0) break
         const slot = guard % mealCount
         const existing = meals[slot].find((it) => it.food.id === fatSource.id)
-        const nextAmount = (existing?.amount ?? 0) + fatSource.baseAmount
+        const nextAmount = (existing?.amount ?? 0) + fatStep
         if (fatSource.maxAmount != null && nextAmount > fatSource.maxAmount) {
           guard++
           continue
         }
         if (existing) existing.amount = nextAmount
-        else meals[slot].push({ food: fatSource, amount: fatSource.baseAmount, unit: fatSource.baseUnit })
+        else meals[slot].push({ food: fatSource, amount: fatStep, unit: fatSource.baseUnit })
         guard++
       }
     }
@@ -318,6 +346,29 @@ export function solve(input: SolveInput): SolveResult {
         }
       }
       riceTotal = shares.reduce((a, b) => a + b, 0)
+    }
+
+    // --- 6b. ★米を置いたあとにもう一度 1食の P 上限を見る ---
+    //   step 4 の削りは「米の P を食数で割った見込み」で判定している。
+    //   実際の米は最後の食事を厚くして配るので、見込みより多く乗る食が出る。
+    //   v3 では主菜が鶏もも（P19/100g）で余裕があり露見しなかったが、v4 で
+    //   そぼろ（調理後 P28/100g）に変わって濃くなり、最後の食事が 80g を超えた。
+    for (let i = 0; i < mealCount; i++) {
+      let guard = 0
+      while (tally(meals[i]).proteinG > maxPPerMeal && guard++ < 300) {
+        const wheyItem = meals[i].find((it) => it.food.id === 'whey' && it.amount > 0)
+        if (wheyItem) {
+          wheyItem.amount -= 1
+          continue
+        }
+        const mainItem = main ? meals[i].find((it) => it.food.id === main.id) : undefined
+        if (mainItem && mainItem.amount > 0) {
+          mainItem.amount = Math.max(0, mainItem.amount - (main!.stepAmount ?? 1))
+          continue
+        }
+        // 主菜もプロテインも無い（米と卵だけで超えている）なら打つ手がない
+        break
+      }
     }
 
     // 削った結果を反映した実際の1食あたりの主菜量を返す

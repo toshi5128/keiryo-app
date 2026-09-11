@@ -45,18 +45,30 @@ await page.evaluate(() => {
     const d = new Date(now.getTime() - n * 86400000)
     return logDate(d)
   }
+  // ★v4 の標準メニュー1食（そぼろ120g・卵1個・ご飯170g・オイル6g）＋プロテイン1杯。
+  //   1食目 P65 なので 45g の警告は出ず、「確保できています」が出るのが正解。
+  const group = 'g1'
   const meal1 = [
-    { name: '白米（炊飯後）', amount: 200, unit: 'g', kcal: 312, proteinG: 5, fatG: 0.6, carbG: 74.2 },
-    { name: '卵', amount: 1, unit: '個', kcal: 76, proteinG: 6.2, fatG: 5.2, carbG: 0.2 },
-    { name: '納豆', amount: 1, unit: 'P', kcal: 90, proteinG: 7.4, fatG: 4.5, carbG: 5.4 },
-    { name: '鶏もも肉（皮なし・低温調理）', amount: 190, unit: 'g', kcal: 215, proteinG: 36.1, fatG: 9.5, carbG: 0 },
+    { name: '鶏そぼろ（調理後・薄味）', foodId: 'sobo', amount: 120, unit: 'g', kcal: 204, proteinG: 33.6, fatG: 4.8, carbG: 7.2, saltG: 1 },
+    { name: '卵', foodId: 'egg', amount: 1, unit: '個', kcal: 76, proteinG: 6, fatG: 5.2, carbG: 0.2, saltG: 0.2 },
+    { name: '白米（炊飯後）', foodId: 'rice', amount: 170, unit: 'g', kcal: 265, proteinG: 4.3, fatG: 0.5, carbG: 62.9, saltG: 0 },
+    { name: 'オリーブオイル', foodId: 'oil', amount: 6, unit: 'g', kcal: 54, proteinG: 0, fatG: 6, carbG: 0, saltG: 0 },
+    { name: 'プロテイン', foodId: 'whey', amount: 1, unit: '杯', kcal: 120, proteinG: 21, fatG: 1.5, carbG: 3, saltG: 0.1 },
   ].map((m, i) => ({
     ...m,
     id: 'seed' + i,
-    saltG: 0.5,
+    groupId: group,
     eatenAt: new Date(wake.getTime() + 30 * 60000).toISOString(),
     logDate: today,
     kind: 'meal',
+  }))
+
+  // 水分（v4 §3）。途中まで飲んだ状態
+  const water = [200, 500, 500].map((ml, i) => ({
+    id: 'w' + i,
+    logDate: today,
+    amountMl: ml,
+    loggedAt: new Date(wake.getTime() + (i + 1) * 40 * 60000).toISOString(),
   }))
 
   const weights = []
@@ -77,8 +89,9 @@ await page.evaluate(() => {
     JSON.stringify({
       ...raw,
       meals: meal1,
+      water,
       weights,
-      bench: [{ logDate: today, weightKg: 100, reps: 7 }],
+      bench: [{ logDate: today, weightKg: 125, reps: 1 }],
       days: { [today]: { wakeAt: wake.toISOString(), trained: true } },
     })
   )
