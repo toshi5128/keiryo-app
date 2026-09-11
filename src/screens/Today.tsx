@@ -403,6 +403,8 @@ export function Today() {
         </div>
         <p className="hint" style={{ marginTop: 10 }}>
           そぼろは★調理後の重量です。生で量ると P を22%少なく数えます。
+          <br />
+          オイル9g ＝ 小さじ2杯（1日27g ＝ 大さじ2杯）。
         </p>
       </div>
 

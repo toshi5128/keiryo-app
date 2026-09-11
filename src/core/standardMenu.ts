@@ -23,6 +23,14 @@
 import type { Food, Macros, PlanItem } from './types'
 import { ZERO, addMacros, macrosOf } from './solver'
 
+/**
+ * ★オリーブオイルの計り方（毎回はかりに載せなくてよいように）
+ *   小さじ1 = 5ml ≒ 4.6g ／ 大さじ1 = 15ml ≒ 13.8g（比重 約0.92）
+ *   → 1食 9g ＝ 小さじ2杯 ／ 1日 27g ＝ 大さじ2杯
+ */
+export const OIL_G_PER_TSP = 4.6
+export const OIL_G_PER_TBSP = 13.8
+
 /** 1食ぶんの構成。amount は food.baseUnit と同じ単位 */
 export const STANDARD_MEAL: ReadonlyArray<{ foodId: string; amount: number }> = [
   { foodId: 'sobo', amount: 120 }, // ★調理後の重量
