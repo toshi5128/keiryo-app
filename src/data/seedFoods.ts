@@ -22,7 +22,11 @@ import type { Food } from '../core/types'
  * シードの版。上げるとローカル保存の食材が新しいシードで塗り直される
  * （在庫スイッチと自分で足した食材は引き継ぐ。store.tsx の migrateFoods 参照）。
  */
-export const SEED_VERSION = 4
+export const SEED_VERSION = 5
+
+/**
+ * v5 で足したもの：トリュフ塩（実物のラベルから。食塩相当量 96g/100g）。
+ */
 
 /** 外食で F・C・塩分が公表されていないときの推定ルール（v4 §5 の「—」を埋める） */
 export const EATING_OUT_FAT_RATIO = 0.3
@@ -484,6 +488,22 @@ export const SEED_FOODS: Food[] = [
   },
 
   // ---- other ------------------------------------------------------------
+  {
+    id: 'truffle_salt',
+    name: 'トリュフ塩',
+    baseAmount: 1,
+    baseUnit: 'g',
+    kcal: 0,
+    proteinG: 0,
+    fatG: 0,
+    carbG: 0,
+    saltG: 0.96,
+    category: 'other',
+    stepAmount: 0.5,
+    maxAmount: 1,
+    dailyMaxAmount: 2,
+    note: 'ラベル実測=食塩相当量96g/100g。カロリーは0だが塩分はほぼ塩そのもの。1食ひとつまみ(0.5g)が目安',
+  },
   {
     id: 'misoshiru',
     name: '味噌汁',

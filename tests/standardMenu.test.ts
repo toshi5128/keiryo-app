@@ -179,3 +179,36 @@ describe('★1週間の買い物（v4 §4）', () => {
     expect(find('米').amount).toBe(1.8)
   })
 })
+
+describe('トリュフ塩（ラベル実測・v5で追加）', () => {
+  const salt = seedFoodById('truffle_salt')
+
+  it('1g = 塩分0.96g（食塩相当量 96g/100g）', () => {
+    expect(salt.baseAmount).toBe(1)
+    expect(salt.saltG).toBe(0.96)
+  })
+
+  it('★カロリー・PFCはすべて0（塩分だけ見ればよい）', () => {
+    expect(salt.kcal).toBe(0)
+    expect(salt.proteinG).toBe(0)
+    expect(salt.fatG).toBe(0)
+    expect(salt.carbG).toBe(0)
+  })
+
+  it('★標準メニュー＋1日1.5g（1食ひとつまみ×3）で上限6gに収まる', () => {
+    const day = standardDayMacros(SEED_FOODS)
+    const withSalt = day.saltG + 1.5 * salt.saltG!
+    expect(withSalt).toBeLessThan(6)
+    expect(withSalt).toBeCloseTo(5.1, 1)
+  })
+
+  it('1日2.5g だと上限を超える', () => {
+    const day = standardDayMacros(SEED_FOODS)
+    expect(day.saltG + 2.5 * salt.saltG!).toBeGreaterThan(6)
+  })
+
+  it('1食1g・1日2g の上限を持たせてある', () => {
+    expect(salt.maxAmount).toBe(1)
+    expect(salt.dailyMaxAmount).toBe(2)
+  })
+})
