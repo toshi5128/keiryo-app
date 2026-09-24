@@ -43,6 +43,8 @@ import {
   checkWater,
 } from '../core/dailyChecks'
 import type { Appetite, Check } from '../core/dailyChecks'
+import { dinnerShare, suggestDinners } from '../core/dinnerIdeas'
+import type { DinnerIdea } from '../core/dinnerIdeas'
 
 const hhmm = (d: Date) =>
   `${d.getHours()}:${d.getMinutes().toString().padStart(2, '0')}`
@@ -137,6 +139,25 @@ export function Today() {
         wants,
       }),
     [plan, eaten, eatenAmounts, mealCount, state.foods, wants]
+  )
+
+  // ---- ★今夜のおかず候補（定番メニュー表から、残りに合う順に3つ） ----
+  const dinnerInput = {
+    target: {
+      kcal: plan.kcal,
+      proteinG: plan.proteinG,
+      fatFloorG: plan.fatFloorG,
+      saltLimitG: plan.saltLimitG,
+    },
+    eaten,
+    eatenAmounts,
+    mealsLeft: mealCount,
+  }
+  const dinnerFor = dinnerShare(dinnerInput)
+  const dinners = useMemo(
+    () => suggestDinners(dinnerInput, state.foods),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, eaten, eatenAmounts, mealCount, state.foods]
   )
 
   const suggestedFoods = result.meals.flatMap((m) => m.items.map((i) => i.food))
@@ -302,6 +323,27 @@ export function Today() {
     setNote({
       title: `${meal.index}食目を記録しました`,
       body: `P${Math.round(meal.totals.proteinG)}g / ${Math.round(meal.totals.kcal)}kcal。残りは自動で組み直しました。`,
+      calm: true,
+    })
+  }
+
+  /** おかず候補をそのまま記録する（ご飯も付ける） */
+  function recordDinner(idea: DinnerIdea) {
+    const at = new Date()
+    const group = uid()
+    const rice = state.foods.find((f) => f.id === 'rice')
+    const rows = idea.items.map((it) => ({ food: it.food, amount: it.amount }))
+    if (rice && idea.riceG > 0) rows.push({ food: rice, amount: idea.riceG })
+    const logs = rows.map((r) => ({
+      ...mealFromFood(r.food, r.amount, state.profile.boundaryHour, 'meal', at),
+      groupId: group,
+    }))
+    update((s) => ({ ...s, meals: [...s.meals, ...logs] }))
+    setNote({
+      title: `${idea.dish.name} を記録しました`,
+      body: `P${Math.round(idea.totals.proteinG)}g / ${Math.round(idea.totals.kcal)}kcal${
+        idea.riceG > 0 ? `（＋ご飯${idea.riceG}g）` : ''
+      }。残りは自動で組み直しました。`,
       calm: true,
     })
   }
@@ -507,6 +549,49 @@ export function Today() {
           </div>
         </div>
       ))}
+
+      {/* ★今夜のおかず候補。ソルバーは「食材と量」、こちらは「何を作るか」 */}
+      {wakeAt && dinnerFor.proteinG > 0 && dinners.length > 0 && (
+        <div className="card">
+          <div className="card-h">
+            <div className="t">
+              今夜のおかず候補<span>合う順</span>
+            </div>
+            <div className="s">
+              残り P{Math.round(dinnerFor.proteinG)} ／ {Math.round(dinnerFor.kcal)} kcal
+            </div>
+          </div>
+          {dinners.map((d, i) => (
+            <div key={d.dish.id} style={{ marginTop: i === 0 ? 0 : 14 }}>
+              <div className="item">
+                <span>
+                  {i + 1}. {d.dish.name}
+                  <span className="sub2">
+                    {d.items.map((it) => `${it.food.name.replace(/（.*?）/, '')} ${it.amount}${it.unit}`).join('・')}
+                  </span>
+                </span>
+                <span className="amt">
+                  P{Math.round(d.totals.proteinG)} / {Math.round(d.totals.kcal)}kcal
+                </span>
+              </div>
+              <p className="hint" style={{ margin: '4px 0 6px' }}>
+                {d.riceG > 0 ? `ご飯は約${d.riceG}g。` : 'ご飯なしで収まります。'}
+                {d.reason}
+                <br />
+                作り方：{d.dish.how}
+              </p>
+              <button className="ghost" onClick={() => recordDinner(d)}>
+                これを作った
+              </button>
+            </div>
+          ))}
+          {mealCount > 1 && (
+            <p className="hint" style={{ marginTop: 10 }}>
+              残り{mealCount}食あるので、今日の残りを{mealCount}等分した量に合わせています。
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 献立を組んだときだけ補足を出す。起床前や1日の終わりに
           「目標に届きません」と言われても、まだ何も始まっていない／もう打つ手がない */}

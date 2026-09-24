@@ -66,6 +66,8 @@ src/core/          数式だけ。画面もDBも知らない。テストはこ�
   weightJudge.ts   体重増加の自動説明・ベンチ判定・起床からの相対スケジュール
   dateBoundary.ts  4:00境界・週（月曜始まり）
   weekBudget.ts    週予算の配分と進捗
+  dinnerIdeas.ts   ★今夜のおかず候補。自炊の定番メニュー表（食材idと量だけ持つ）を
+                   その日の残りP・kcal・脂質下限・塩分に合う順に3つ並べる。端末内で計算
   types.ts
 src/data/
   seedFoods.ts     初期シード（v4 §5 の表そのまま。外食8件・参照専用1件を含む）
